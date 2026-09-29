@@ -9,7 +9,8 @@ import com.seat_reservation_system.srv.repository.TripSeatRepository;
 import com.seat_reservation_system.srv.util.AppTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -22,14 +23,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
-/**
- * Seeds the demo bus catalogue on startup AND keeps a rolling 7-day window alive.
- * Previously trips were only created once at boot, so a long-running deployment ran out of
- * bookable dates after a week.
- */
 @Component
-public class DataSeeder implements CommandLineRunner {
+public class DataSeeder {
 
     private static final Logger log = LoggerFactory.getLogger(DataSeeder.class);
     private static final int DAYS_AHEAD = 7;
@@ -48,12 +45,19 @@ public class DataSeeder implements CommandLineRunner {
         this.tripSeatRepository = tripSeatRepository;
     }
 
-    @Override
-    public void run(String... args) {
-        seed();
+    @EventListener(ApplicationReadyEvent.class)
+    public void initialSeed() {
+        CompletableFuture.runAsync(() -> {
+            try {
+                log.info("Starting background bus catalogue seed");
+                seed();
+                log.info("Background bus catalogue seed completed");
+            } catch (RuntimeException exception) {
+                log.error("Initial bus catalogue seeding failed", exception);
+            }
+        });
     }
 
-    // Every day just after midnight IST, top the window up so new dates keep appearing.
     @Scheduled(cron = "0 5 0 * * *", zone = "${app.timezone:Asia/Kolkata}")
     public void scheduledTopUp() {
         try {
@@ -65,19 +69,23 @@ public class DataSeeder implements CommandLineRunner {
 
     private synchronized void seed() {
         List<Seat> seats;
+
         if (seatRepository.count() == 0) {
             seats = new ArrayList<>();
+
             for (char row = 'A'; row <= 'E'; row++) {
                 for (int number = 1; number <= 10; number++) {
                     seats.add(new Seat(row + String.valueOf(number)));
                 }
             }
+
             seatRepository.saveAll(seats);
         } else {
             seats = seatRepository.findAll();
         }
 
         LocalDate start = AppTime.today();
+
         List<RouteSeed> routes = List.of(
                 new RouteSeed("Shivneri Travels", "AC Sleeper", "Pune", "Mumbai", 360, "06:00", 600, 4.5),
                 new RouteSeed("Neeta Travels", "AC Seater", "Pune", "Mumbai", 180, "07:30", 550, 4.3),
@@ -94,34 +102,52 @@ public class DataSeeder implements CommandLineRunner {
         );
 
         List<BusTrip> existingTrips = busTripRepository.findAll();
+
         Set<String> existingKeys = new HashSet<>();
+
         for (BusTrip trip : existingTrips) {
-            existingKeys.add(tripKey(
-                    trip.getOperatorName(), trip.getFromCity(), trip.getToCity(), trip.getDepartureTime()
-            ));
+            existingKeys.add(
+                    tripKey(
+                            trip.getOperatorName(),
+                            trip.getFromCity(),
+                            trip.getToCity(),
+                            trip.getDepartureTime()
+                    )
+            );
         }
 
         List<BusTrip> missingTrips = new ArrayList<>();
 
         for (int day = 0; day < DAYS_AHEAD; day++) {
             LocalDate date = start.plusDays(day);
-            for (RouteSeed route : routes) {
-                LocalDateTime departure = LocalDateTime.of(date, LocalTime.parse(route.time));
 
-                if (existingKeys.add(tripKey(route.operator, route.from, route.to, departure))) {
-                    missingTrips.add(new BusTrip(
-                            route.operator,
-                            route.operator + " Express",
-                            route.type,
-                            route.from,
-                            route.to,
-                            departure,
-                            departure.plusMinutes(route.duration),
-                            route.duration,
-                            BigDecimal.valueOf(route.price),
-                            BigDecimal.valueOf(route.rating),
-                            "WiFi, Charging, Live Tracking"
-                    ));
+            for (RouteSeed route : routes) {
+                LocalDateTime departure =
+                        LocalDateTime.of(date, LocalTime.parse(route.time));
+
+                if (existingKeys.add(
+                        tripKey(
+                                route.operator,
+                                route.from,
+                                route.to,
+                                departure
+                        )
+                )) {
+                    missingTrips.add(
+                            new BusTrip(
+                                    route.operator,
+                                    route.operator + " Express",
+                                    route.type,
+                                    route.from,
+                                    route.to,
+                                    departure,
+                                    departure.plusMinutes(route.duration),
+                                    route.duration,
+                                    BigDecimal.valueOf(route.price),
+                                    BigDecimal.valueOf(route.rating),
+                                    "WiFi, Charging, Live Tracking"
+                            )
+                    );
                 }
             }
         }
@@ -130,27 +156,42 @@ public class DataSeeder implements CommandLineRunner {
             existingTrips.addAll(busTripRepository.saveAll(missingTrips));
         }
 
-        // Only trips that are still upcoming (or just created) need their seat rows verified.
         LocalDateTime cutoff = AppTime.now().minusDays(1);
 
         for (BusTrip trip : existingTrips) {
-            if (trip.getDepartureTime().isBefore(cutoff)) continue;
+            if (trip.getDepartureTime().isBefore(cutoff)) {
+                continue;
+            }
 
-            long configuredSeats = tripSeatRepository.countByTripId(trip.getId());
-            if (configuredSeats == seats.size()) continue;
+            long configuredSeats =
+                    tripSeatRepository.countByTripId(trip.getId());
+
+            if (configuredSeats == seats.size()) {
+                continue;
+            }
 
             List<TripSeat> tripSeats = new ArrayList<>();
+
             if (configuredSeats == 0) {
-                for (Seat seat : seats) tripSeats.add(new TripSeat(trip, seat));
+                for (Seat seat : seats) {
+                    tripSeats.add(new TripSeat(trip, seat));
+                }
             } else {
                 for (Seat seat : seats) {
-                    if (tripSeatRepository.findByTripIdAndSeatIdWithTripAndSeat(trip.getId(), seat.getId()).isEmpty()) {
+                    if (tripSeatRepository
+                            .findByTripIdAndSeatIdWithTripAndSeat(
+                                    trip.getId(),
+                                    seat.getId()
+                            )
+                            .isEmpty()) {
                         tripSeats.add(new TripSeat(trip, seat));
                     }
                 }
             }
 
-            if (!tripSeats.isEmpty()) tripSeatRepository.saveAll(tripSeats);
+            if (!tripSeats.isEmpty()) {
+                tripSeatRepository.saveAll(tripSeats);
+            }
         }
 
         if (!missingTrips.isEmpty()) {
@@ -158,15 +199,30 @@ public class DataSeeder implements CommandLineRunner {
         }
     }
 
-    private static String tripKey(String operator, String from, String to, LocalDateTime departure) {
-        return operator.toLowerCase(Locale.ROOT) + "|"
-                + from.toLowerCase(Locale.ROOT) + "|"
-                + to.toLowerCase(Locale.ROOT) + "|"
+    private static String tripKey(
+            String operator,
+            String from,
+            String to,
+            LocalDateTime departure
+    ) {
+        return operator.toLowerCase(Locale.ROOT)
+                + "|"
+                + from.toLowerCase(Locale.ROOT)
+                + "|"
+                + to.toLowerCase(Locale.ROOT)
+                + "|"
                 + departure;
     }
 
     private record RouteSeed(
-            String operator, String type, String from, String to,
-            int duration, String time, int price, double rating
-    ) {}
+            String operator,
+            String type,
+            String from,
+            String to,
+            int duration,
+            String time,
+            int price,
+            double rating
+    ) {
+    }
 }
