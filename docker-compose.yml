@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: seat-reservation-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: seat_reservation
+      POSTGRES_USER: ${POSTGRES_USER:-srv_prosgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-srv_pass_1234}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d seat_reservation"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    container_name: seat-reservation-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seat-reservation-backend
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      DB_USERNAME: ${POSTGRES_USER:-srv_prosgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-srv_pass_1234}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/seat_reservation
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET:-seatreserve-local-development-jwt-secret-change-this-2026}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
+      WALLET_DEMO_TOP_UP_ENABLED: ${WALLET_DEMO_TOP_UP_ENABLED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  redis_data:
