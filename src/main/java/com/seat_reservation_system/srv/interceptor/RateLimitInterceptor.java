@@ -2,6 +2,8 @@ package com.seat_reservation_system.srv.interceptor;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
@@ -13,6 +15,7 @@ import java.time.Duration;
 @Component
 public class RateLimitInterceptor implements HandlerInterceptor {
 
+    private static final Logger log = LoggerFactory.getLogger(RateLimitInterceptor.class);
     private static final String RATE_LIMIT_PREFIX = "ratelimit:";
     private static final Duration WINDOW = Duration.ofMinutes(1);
 
@@ -49,16 +52,24 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                 : "ip:" + request.getRemoteAddr();
         String key = RATE_LIMIT_PREFIX + identifier;
 
-        Long requestCount =
-                stringRedisTemplate
-                        .opsForValue()
-                        .increment(key);
+        Long requestCount;
 
-        if (requestCount != null && requestCount == 1) {
-            stringRedisTemplate.expire(
-                    key,
-                    WINDOW
-            );
+        try {
+            requestCount =
+                    stringRedisTemplate
+                            .opsForValue()
+                            .increment(key);
+
+            if (requestCount != null && requestCount == 1) {
+                stringRedisTemplate.expire(
+                        key,
+                        WINDOW
+                );
+            }
+        } catch (RuntimeException exception) {
+            // A Redis hiccup must never turn login/payments into HTTP 500 - fail open and log it.
+            log.warn("[RATELIMIT] Redis unavailable, allowing request {}: {}", key, exception.toString());
+            return true;
         }
 
         if (requestCount != null &&

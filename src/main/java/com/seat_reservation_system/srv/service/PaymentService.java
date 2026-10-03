@@ -456,8 +456,9 @@ public class PaymentService {
             String username
     ) {
         if (!reservation.getUserIdentifier().equals(username)) {
-            throw new IllegalArgumentException(
-                    "You do not own this reservation."
+            // 404 (not 400/403) so one user cannot probe which reservation ids belong to others.
+            throw new ResourceNotFoundException(
+                    "Reservation not found: " + reservation.getId()
             );
         }
     }
@@ -521,15 +522,6 @@ public class PaymentService {
             Long reservationId,
             String username
     ) {
-        Payment payment =
-                paymentRepository
-                        .findByReservationId(reservationId)
-                        .orElseThrow(() ->
-                                new ResourceNotFoundException(
-                                        "Payment not found."
-                                )
-                        );
-
         Reservation reservation =
                 reservationRepository
                         .findByIdWithSeatAndTrip(reservationId)
@@ -540,6 +532,15 @@ public class PaymentService {
                         );
 
         verifyOwner(reservation, username);
+
+        Payment payment =
+                paymentRepository
+                        .findByReservationId(reservationId)
+                        .orElseThrow(() ->
+                                new ResourceNotFoundException(
+                                        "Payment not found."
+                                )
+                        );
 
         return toResponse(
                 payment,
@@ -552,6 +553,17 @@ public class PaymentService {
             Long reservationId,
             String username
     ) {
+        Reservation reservation =
+                reservationRepository
+                        .findByIdWithSeatAndTrip(reservationId)
+                        .orElseThrow(() ->
+                                new ResourceNotFoundException(
+                                        "Reservation not found."
+                                )
+                        );
+
+        verifyOwner(reservation, username);
+
         Payment payment =
                 paymentRepository
                         .findByReservationId(reservationId)
@@ -566,17 +578,6 @@ public class PaymentService {
                     "Ticket is not available for this payment."
             );
         }
-
-        Reservation reservation =
-                reservationRepository
-                        .findByIdWithSeatAndTrip(reservationId)
-                        .orElseThrow(() ->
-                                new ResourceNotFoundException(
-                                        "Reservation not found."
-                                )
-                        );
-
-        verifyOwner(reservation, username);
 
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
             throw new IllegalArgumentException(

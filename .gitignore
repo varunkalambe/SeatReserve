@@ -41,3 +41,7 @@ frontend/.env.*
 node_modules/
 frontend/dist/
 .vercel
+combined_codebase.txt
+*.bak
+*.patch
+.env

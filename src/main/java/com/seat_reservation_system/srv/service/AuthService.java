@@ -10,6 +10,7 @@ import com.seat_reservation_system.srv.exception.UsernameAlreadyExistsException;
 import com.seat_reservation_system.srv.repository.UserRepository;
 import com.seat_reservation_system.srv.security.JwtService;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -84,8 +85,16 @@ public class AuthService {
 
         user.setEmail(email);
 
-        AppUser saved =
-                userRepository.save(user);
+        AppUser saved;
+
+        try {
+            // saveAndFlush so a concurrent duplicate sign-up fails HERE (clean 409), not at commit (500).
+            saved = userRepository.saveAndFlush(user);
+        } catch (DataIntegrityViolationException exception) {
+            throw new UsernameAlreadyExistsException(
+                    "An account with this username or email already exists."
+            );
+        }
 
         return response(saved);
     }
