@@ -1874,19 +1874,56 @@ function BookingsView({
   )
 }
 
-function WalletView({ balance, transactions, onTopUp }) {
+function WalletView({ balance, transactions, info, onTopUp }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [customAmount, setCustomAmount] = useState('')
 
-  const demoTopUpEnabled =
-    import.meta.env.VITE_WALLET_TOPUP_ENABLED === 'true'
+  // The SERVER decides whether top-up is available (wallet.demo-top-up-enabled), so the UI can never
+  // disagree with the API. Older backends do not send the flag: treat "unknown" as enabled and let
+  // the server answer with a clear message if it is switched off.
+  const topUpEnabled = info?.topUpEnabled !== false
+  const minTopUp = Number(info?.minTopUp ?? 1)
+  const maxTopUp = Number(info?.maxTopUp ?? 50000)
+  const remainingToday =
+    info?.dailyTopUpRemaining === undefined || info?.dailyTopUpRemaining === null
+      ? null
+      : Number(info.dailyTopUpRemaining)
 
-  const topUp = async amount => {
+  const limitFor = () =>
+    remainingToday === null ? maxTopUp : Math.min(maxTopUp, remainingToday)
+
+  const validate = amount => {
+    if (!Number.isFinite(amount) || amount <= 0) return 'Enter a valid amount.'
+    if (amount < minTopUp) return `Minimum top-up is ${money(minTopUp)}.`
+    if (amount > maxTopUp) return `Maximum top-up per transaction is ${money(maxTopUp)}.`
+    if (remainingToday !== null && amount > remainingToday) {
+      return remainingToday <= 0
+        ? 'Your daily top-up limit has been reached. Try again tomorrow.'
+        : `You can add up to ${money(remainingToday)} more today.`
+    }
+    return ''
+  }
+
+  const topUp = async rawAmount => {
+    const amount = Math.round(Number(rawAmount) * 100) / 100
+    const problem = validate(amount)
+
+    setSuccess('')
+
+    if (problem) {
+      setError(problem)
+      return
+    }
+
     setBusy(true)
     setError('')
 
     try {
       await onTopUp(amount)
+      setSuccess(`${money(amount)} added to your wallet.`)
+      setCustomAmount('')
     } catch (requestError) {
       setError(requestError.message)
     } finally {
@@ -1925,20 +1962,16 @@ function WalletView({ balance, transactions, onTopUp }) {
         <section className="panel-card topup-card">
           <span className="eyebrow">WALLET FUNDING</span>
 
-          <h3>
-            {demoTopUpEnabled
-              ? 'Development top-up'
-              : 'Top-up unavailable'}
-          </h3>
+          <h3>{topUpEnabled ? 'Add money' : 'Top-up unavailable'}</h3>
 
-          {demoTopUpEnabled ? (
+          {topUpEnabled ? (
             <>
               <div className="topup-buttons">
                 {[500, 1000, 2000, 5000].map(amount => (
                   <button
                     key={amount}
                     type="button"
-                    disabled={busy}
+                    disabled={busy || amount > limitFor()}
                     onClick={() => topUp(amount)}
                   >
                     {money(amount)}
@@ -1946,19 +1979,75 @@ function WalletView({ balance, transactions, onTopUp }) {
                 ))}
               </div>
 
+              <div className="topup-buttons">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={minTopUp}
+                  max={limitFor()}
+                  step="1"
+                  value={customAmount}
+                  disabled={busy}
+                  style={{
+                    height: 40,
+                    minWidth: 0,
+                    padding: '0 10px',
+                    border: '1px solid #d7e2ee',
+                    borderRadius: 8,
+                    background: '#fbfdff',
+                    fontSize: 13,
+                  }}
+                  placeholder="Custom amount"
+                  aria-label="Custom top-up amount"
+                  onChange={event => {
+                    setCustomAmount(event.target.value)
+                    setError('')
+                    setSuccess('')
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      topUp(customAmount)
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={busy || customAmount === ''}
+                  onClick={() => topUp(customAmount)}
+                >
+                  {busy ? 'Adding…' : 'Add'}
+                </button>
+              </div>
+
               <small>
-                Development-only wallet credit. It is disabled on the public
-                deployment because no real payment gateway is connected.
+                Instant top-up, {money(minTopUp)} to {money(maxTopUp)} per transaction
+                {remainingToday !== null && <> · {money(remainingToday)} left today</>}.
+                Payments are simulated until a real payment gateway is connected.
               </small>
             </>
           ) : (
             <small>
-              Wallet top-up is disabled on the deployed build. Real funding
-              should be enabled only after connecting a verified payment provider.
+              Wallet top-up is currently switched off on the server. Refunds from cancelled
+              bookings are still credited to your wallet.
             </small>
           )}
 
           {error && <div className="alert error">{error}</div>}
+          {success && (
+            <div
+              className="alert"
+              role="status"
+              style={{
+                background: '#f0faf4',
+                border: '1px solid #c5e8d1',
+                color: '#2f7d4f',
+                marginTop: 10,
+              }}
+            >
+              {success}
+            </div>
+          )}
         </section>
 
         <section className="panel-card wallet-transactions">
@@ -2583,6 +2672,7 @@ function App() {
   const [pendingReservations, setPendingReservations] = useState([])
   const [paymentOrigin, setPaymentOrigin] = useState('seats')
   const [walletBalance, setWalletBalance] = useState(0)
+  const [walletInfo, setWalletInfo] = useState(null)
   const [walletTransactions, setWalletTransactions] = useState([])
   const [supportTickets, setSupportTickets] = useState([])
   const [notifications, setNotifications] = useState([])
@@ -2615,6 +2705,7 @@ function App() {
 
     setAuth(null)
     setProfile(null)
+    setWalletInfo(null)
     setReservations([])
     setPendingReservations([])
     setSelectedTrip(null)
@@ -2652,6 +2743,7 @@ function App() {
     ])
 
     setWalletBalance(Number(wallet?.balance || 0))
+    setWalletInfo(wallet || null)
     setWalletTransactions(transactions || [])
   }, [auth?.token])
 
@@ -2696,6 +2788,7 @@ function App() {
           setPopularTrips(popular || [])
           setReservations(stampReservations(bookingData))
           setWalletBalance(Number(wallet?.balance || 0))
+          setWalletInfo(wallet || null)
           setWalletTransactions(transactions || [])
           setSupportTickets(tickets || [])
           setNotifications(noteData || [])
@@ -2980,16 +3073,25 @@ function App() {
 
       setPendingReservations([])
 
-      await refreshReservations()
-      await refreshWallet()
-      await refreshNotifications()
+      // The payment already succeeded. Anything below is a refresh: if one of these requests
+      // fails it must not look like the payment failed (the poll catches up within seconds).
+      const followUps = await Promise.allSettled([
+        refreshReservations(),
+        refreshWallet(),
+        refreshNotifications(),
+        api.getTicket(auth.token, firstReservationId).then(setTicket),
+      ])
 
-      setTicket(
-        await api.getTicket(
-          auth.token,
-          firstReservationId
-        )
-      )
+      followUps.forEach((outcome, index) => {
+        if (outcome.status === 'rejected') {
+          debugLog('PAY', `follow-up #${index} failed`, outcome.reason?.status, outcome.reason?.message)
+        }
+      })
+
+      if (followUps.some(outcome => outcome.status === 'rejected' && outcome.reason?.status === 401)) {
+        logout()
+        return
+      }
 
       setActiveView('bookings')
     } catch (error) {
@@ -3118,6 +3220,7 @@ function App() {
 
         walletAfter = Number(wallet?.balance || 0)
         setWalletBalance(walletAfter)
+        setWalletInfo(wallet || null)
         setWalletTransactions(transactions || [])
       } catch (walletError) {
         debugLog('CANCEL', 'wallet refresh failed', walletError.status, walletError.message)
@@ -3260,24 +3363,27 @@ function App() {
     await refreshNotifications()
   }
 
+  // Throws on failure so the wallet card can show the SERVER's message (daily limit, max balance, ...).
   const topUp = async amount => {
     try {
-      const data = await api.topUpWallet(
-        auth.token,
-        amount
-      )
+      const data = await api.topUpWallet(auth.token, amount)
 
       setWalletBalance(Number(data?.balance || 0))
-      setWalletTransactions(
-        await api.getWalletTransactions(auth.token)
-      )
-      await refreshNotifications()
+      setWalletInfo(data || null)
+
+      try {
+        setWalletTransactions(await api.getWalletTransactions(auth.token))
+        await refreshNotifications()
+      } catch {
+        /* the money is already added; the next poll refreshes the list */
+      }
     } catch (error) {
       if (error.status === 401) {
         logout()
-      } else {
-        setAppError(error.message)
+        return
       }
+
+      throw error
     }
   }
 
@@ -3413,6 +3519,7 @@ function App() {
             <WalletView
               balance={walletBalance}
               transactions={walletTransactions}
+              info={walletInfo}
               onTopUp={topUp}
             />
           )}
@@ -3467,3 +3574,5 @@ function App() {
 }
 
 export default App
+
+

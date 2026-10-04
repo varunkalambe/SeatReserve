@@ -167,6 +167,8 @@ public class WalletService {
     }
 
     private static String inr(BigDecimal value) {
-        return "₹" + value.setScale(2, RoundingMode.HALF_UP).toPlainString();
+        return "\u20B9" + value.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 }
+
+

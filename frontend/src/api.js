@@ -47,8 +47,16 @@ function checkBackendBuild(response, path) {
   window.dispatchEvent(new CustomEvent('srv-backend-stale'))
 }
 
+const GATEWAY_STATUSES = new Set([502, 503, 504])
+
+// A sleeping free-tier backend (Render) can need a while to wake up, so be generous.
+const REQUEST_TIMEOUT_MS = 100000
+const GET_ATTEMPTS = 3
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 async function request(path, { token, ...options } = {}) {
-  const method = options.method || 'GET'
+  const method = (options.method || 'GET').toUpperCase()
   const startedAt = performance.now()
   let sentBody = ''
   if (typeof options.body === 'string') {
@@ -72,17 +80,47 @@ async function request(path, { token, ...options } = {}) {
     headers.set('Authorization', `Bearer ${token}`)
   }
 
-  let response
+  // Only idempotent GET requests are retried (network drop or a proxy answering 502/503/504 while the
+  // backend wakes up). POST/PATCH are never replayed automatically: that could pay or book twice.
+  const maxAttempts = method === 'GET' ? GET_ATTEMPTS : 1
 
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      headers,
-    })
-  } catch (cause) {
-    debugLog('API', '✗ network error', method, path, cause)
+  let response = null
+  let lastFailure = null
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+    try {
+      response = await fetch(`${API_BASE_URL}${path}`, {
+        ...options,
+        method,
+        headers,
+        signal: controller.signal,
+      })
+      lastFailure = null
+    } catch (cause) {
+      response = null
+      lastFailure = cause
+      debugLog('API', '✗ network error', method, path, `attempt ${attempt}/${maxAttempts}`, cause)
+    } finally {
+      clearTimeout(timer)
+    }
+
+    const retryable =
+      response === null || (method === 'GET' && GATEWAY_STATUSES.has(response.status))
+
+    if (!retryable || attempt === maxAttempts) break
+
+    await sleep(1500 * attempt)
+  }
+
+  if (response === null) {
+    const timedOut = lastFailure?.name === 'AbortError'
     const networkError = new Error(
-      'Cannot reach the server. Check your internet connection and try again.'
+      timedOut
+        ? 'The server took too long to respond. It may be waking up - please try again in a moment.'
+        : 'Cannot reach the server. Check your internet connection and try again.'
     )
     networkError.status = 0
     throw networkError
@@ -93,7 +131,9 @@ async function request(path, { token, ...options } = {}) {
     ? await response.json().catch(() => null)
     : null
 
-  checkBackendBuild(response, path)
+  if (!GATEWAY_STATUSES.has(response.status)) {
+    checkBackendBuild(response, path)
+  }
 
   debugLog(
     'API',
@@ -106,12 +146,28 @@ async function request(path, { token, ...options } = {}) {
   )
 
   if (!response.ok) {
-    const error = new Error(
-      data?.error ||
-        (response.status === 429
-          ? 'Too many requests. Please wait a minute and try again.'
-          : `Request failed with status ${response.status}`)
-    )
+    let message = data?.error
+
+    if (!message) {
+      if (response.status === 429) {
+        message = 'Too many requests. Please wait a minute and try again.'
+      } else if (GATEWAY_STATUSES.has(response.status)) {
+        message =
+          'The server is starting up or temporarily unavailable. Please wait a few seconds and try again.'
+      } else if (response.status === 404 && !API_BASE_URL && !import.meta.env.DEV) {
+        // Production build without VITE_API_BASE_URL: /api/... is requested from the static host.
+        message =
+          'The app is not connected to its backend. Set VITE_API_BASE_URL to the backend URL in the hosting settings and redeploy.'
+        console.error(
+          `[SRV] ${method} ${path} returned 404 from the static host. ` +
+            'VITE_API_BASE_URL is empty in this build, so API calls never reach the backend.'
+        )
+      } else {
+        message = `Request failed with status ${response.status}`
+      }
+    }
+
+    const error = new Error(message)
     error.status = response.status
     error.data = data
     throw error
@@ -243,3 +299,5 @@ export const api = {
   getNotifications: (token) =>
     request('/api/notifications', { token }),
 }
+
+
