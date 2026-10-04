@@ -2650,10 +2650,66 @@ function NotificationPanel({ notifications, onClose }) {
   )
 }
 
+// ---- URL routing -------------------------------------------------------------------------------
+// Every screen has its own address, so refresh keeps you on the same screen, the browser back and
+// forward buttons work, and a link such as /wallet can be bookmarked or shared. Implemented with the
+// browser History API directly (no extra dependency).
+const VIEW_PATHS = {
+  home: '/',
+  search: '/search',
+  seats: '/seats',
+  payment: '/checkout',
+  bookings: '/bookings',
+  wallet: '/wallet',
+  profile: '/profile',
+  support: '/support',
+}
+
+const VIEW_TITLES = {
+  home: 'Home',
+  search: 'Search trips',
+  seats: 'Select seats',
+  payment: 'Checkout',
+  bookings: 'My bookings',
+  wallet: 'Wallet',
+  profile: 'Profile',
+  support: 'Support',
+}
+
+function viewFromPath(pathname) {
+  const clean = String(pathname || '/').replace(/\/+$/, '') || '/'
+  const match = Object.entries(VIEW_PATHS).find(([, path]) => path === clean)
+  return match ? match[0] : 'home'
+}
+
+// "seats" and "checkout" only make sense with an in-memory trip / seat hold. A fresh page load (or a
+// history entry whose data is gone) falls back to search instead of rendering an empty screen.
+function resolvableView(view, { hasTrip, hasPending }) {
+  if (view === 'seats' && !hasTrip) return 'search'
+  if (view === 'payment' && !hasPending) return 'search'
+  return view
+}
+
 function App() {
   const stored = loadStoredAuth()
   const [auth, setAuth] = useState(stored)
-  const [activeView, setActiveView] = useState('home')
+  const [activeView, setActiveViewState] = useState(() =>
+    resolvableView(viewFromPath(window.location.pathname), {
+      hasTrip: false,
+      hasPending: false,
+    })
+  )
+
+  // Switching screens adds a browser history entry, so the back button works.
+  const setActiveView = useCallback(view => {
+    setActiveViewState(view)
+
+    const path = VIEW_PATHS[view] || '/'
+
+    if (window.location.pathname !== path) {
+      window.history.pushState({ view }, '', path)
+    }
+  }, [])
   const [profile, setProfile] = useState(null)
   const [popularTrips, setPopularTrips] = useState([])
   const [searchTrips, setSearchTrips] = useState([])
@@ -2699,6 +2755,42 @@ function App() {
     return () => window.removeEventListener('srv-backend-stale', onStale)
   }, [])
 
+  const routeGuardRef = useRef({ hasTrip: false, hasPending: false })
+  routeGuardRef.current = {
+    hasTrip: Boolean(selectedTrip),
+    hasPending: pendingReservations.length > 0,
+  }
+
+  useEffect(() => {
+    const syncFromLocation = () => {
+      const view = resolvableView(
+        viewFromPath(window.location.pathname),
+        routeGuardRef.current
+      )
+
+      setActiveViewState(view)
+
+      const path = VIEW_PATHS[view]
+
+      if (window.location.pathname !== path) {
+        window.history.replaceState({ view }, '', path)
+      }
+    }
+
+    // Normalise the address on first load (for example /seats with nothing selected -> /search).
+    syncFromLocation()
+
+    window.addEventListener('popstate', syncFromLocation)
+
+    return () => window.removeEventListener('popstate', syncFromLocation)
+  }, [])
+
+  useEffect(() => {
+    document.title = auth?.token
+      ? `${VIEW_TITLES[activeView] || 'SeatReserve'} · SeatReserve`
+      : 'Sign in · SeatReserve'
+  }, [activeView, auth?.token])
+
   const logout = useCallback(() => {
     localStorage.removeItem(AUTH_STORAGE_KEY)
     sessionStorage.removeItem(AUTH_STORAGE_KEY)
@@ -2706,6 +2798,8 @@ function App() {
     setAuth(null)
     setProfile(null)
     setWalletInfo(null)
+    setActiveViewState('home')
+    window.history.replaceState({ view: 'home' }, '', '/')
     setReservations([])
     setPendingReservations([])
     setSelectedTrip(null)
