@@ -13,6 +13,10 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -34,15 +38,21 @@ public class DataSeeder {
     private final SeatRepository seatRepository;
     private final BusTripRepository busTripRepository;
     private final TripSeatRepository tripSeatRepository;
+    private final TransactionTemplate transactionTemplate;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public DataSeeder(
             SeatRepository seatRepository,
             BusTripRepository busTripRepository,
-            TripSeatRepository tripSeatRepository
+            TripSeatRepository tripSeatRepository,
+            TransactionTemplate transactionTemplate
     ) {
         this.seatRepository = seatRepository;
         this.busTripRepository = busTripRepository;
         this.tripSeatRepository = tripSeatRepository;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -67,7 +77,27 @@ public class DataSeeder {
         }
     }
 
+    /**
+     * Runs the seed in ONE transaction guarded by a PostgreSQL advisory lock, so two instances
+     * (rolling deploy, scale-out) can never create duplicate trips - duplicates were what made an
+     * already-booked bus show up again with all seats free.
+     */
     private synchronized void seed() {
+        transactionTemplate.executeWithoutResult(status -> {
+            Object locked = entityManager
+                    .createNativeQuery("select pg_try_advisory_xact_lock(748201)")
+                    .getSingleResult();
+
+            if (!Boolean.TRUE.equals(locked)) {
+                log.info("Another instance is seeding the bus catalogue - skipping");
+                return;
+            }
+
+            seedLocked();
+        });
+    }
+
+    private void seedLocked() {
         List<Seat> seats;
 
         if (seatRepository.count() == 0) {
@@ -226,3 +256,4 @@ public class DataSeeder {
     ) {
     }
 }
+

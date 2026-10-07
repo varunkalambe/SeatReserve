@@ -65,9 +65,9 @@ public class AppUser implements UserDetails {
 
     public Long getId() { return id; }
     @Override public String getUsername() { return username; }
-    public void setUsername(String username) { this.username = username; }
+    public void setUsername(String username) { this.username = username; touch(); }
     @Override public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
+    public void setPassword(String password) { this.password = password; touch(); }
     public Role getRole() { return role; }
     public void setRole(Role role) { this.role = role; }
     public String getFullName() { return fullName; }
@@ -93,3 +93,5 @@ public class AppUser implements UserDetails {
     @Override public boolean isCredentialsNonExpired() { return true; }
     @Override public boolean isEnabled() { return true; }
 }
+
+

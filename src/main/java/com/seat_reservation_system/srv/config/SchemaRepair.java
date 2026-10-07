@@ -75,10 +75,51 @@ public class SchemaRepair implements ApplicationRunner {
                 repair(connection, target);
             }
 
+            maintainIntegrity(connection);
+
             log.info("[SCHEMA] check finished");
         } catch (Exception exception) {
             // Never block start-up because of a repair problem.
             log.error("[SCHEMA] repair failed - the application continues without it", exception);
+        }
+    }
+
+    private static final String DUPLICATE_TRIP = """
+            exists (select 1 from bus_trips k
+                    where k.id < b.id
+                      and lower(k.operator_name) = lower(b.operator_name)
+                      and lower(k.from_city) = lower(b.from_city)
+                      and lower(k.to_city) = lower(b.to_city)
+                      and k.departure_time = b.departure_time)
+              and not exists (select 1 from reservations r where r.trip_id = b.id)
+            """;
+
+    /**
+     * Data-integrity guards (idempotent, each step isolated so one failure never blocks start-up):
+     * 1) removes duplicate catalogue trips that have no bookings, 2) forbids duplicate trips,
+     * 3) forbids two live reservations for the same seat (database-level double-booking guard).
+     */
+    private void maintainIntegrity(Connection connection) {
+        String[][] steps = {
+                {"remove duplicate trip seats",
+                        "delete from trip_seats where trip_id in (select b.id from bus_trips b where " + DUPLICATE_TRIP + ")"},
+                {"remove duplicate trips",
+                        "delete from bus_trips b where " + DUPLICATE_TRIP},
+                {"unique trip schedule",
+                        "create unique index if not exists uk_bus_trip_schedule on bus_trips "
+                                + "(lower(operator_name), lower(from_city), lower(to_city), departure_time)"},
+                {"one live reservation per seat",
+                        "create unique index if not exists uk_reservation_live_trip_seat on reservations (trip_seat_id) "
+                                + "where status in ('PENDING','CONFIRMED') and trip_seat_id is not null"}
+        };
+
+        for (String[] step : steps) {
+            try (Statement statement = connection.createStatement()) {
+                int rows = statement.executeUpdate(step[1]);
+                log.info("[SCHEMA] {} ok (rows={})", step[0], rows);
+            } catch (Exception exception) {
+                log.error("[SCHEMA] {} FAILED - fix the conflicting rows manually: {}", step[0], exception.getMessage());
+            }
         }
     }
 
@@ -148,3 +189,5 @@ public class SchemaRepair implements ApplicationRunner {
         }
     }
 }
+
+

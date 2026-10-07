@@ -2100,8 +2100,9 @@ function WalletView({ balance, transactions, info, onTopUp }) {
   )
 }
 
-function ProfileView({ profile, onSave }) {
+function ProfileView({ profile, onSave, onChangePassword }) {
   const [form, setForm] = useState({
+    username: profile?.username || '',
     fullName: profile?.fullName || '',
     email: profile?.email || '',
     phone: profile?.phone || '',
@@ -2112,11 +2113,32 @@ function ProfileView({ profile, onSave }) {
 
   useEffect(() => {
     setForm({
+      username: profile?.username || '',
       fullName: profile?.fullName || '',
       email: profile?.email || '',
       phone: profile?.phone || '',
     })
   }, [profile])
+
+  const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '' })
+  const [passwordBusy, setPasswordBusy] = useState(false)
+  const [passwordMessage, setPasswordMessage] = useState('')
+
+  const submitPassword = async e => {
+    e.preventDefault()
+    setPasswordBusy(true)
+    setPasswordMessage('')
+
+    try {
+      await onChangePassword(passwords)
+      setPasswords({ currentPassword: '', newPassword: '' })
+      setPasswordMessage('Password changed successfully.')
+    } catch (error) {
+      setPasswordMessage(error.message)
+    } finally {
+      setPasswordBusy(false)
+    }
+  }
 
   const submit = async e => {
     e.preventDefault()
@@ -2197,7 +2219,17 @@ function ProfileView({ profile, onSave }) {
 
             <label>
               Username
-              <input value={profile?.username || ''} disabled />
+              <input
+                value={form.username}
+                onChange={e => setForm({ ...form, username: e.target.value })}
+                minLength={3}
+                maxLength={50}
+                pattern="[A-Za-z0-9._\-]+"
+                title="3-50 characters: letters, numbers, dots, dashes, underscores"
+                autoCapitalize="none"
+                autoComplete="username"
+                required
+              />
             </label>
 
             <div className="profile-save-row">
@@ -2218,6 +2250,50 @@ function ProfileView({ profile, onSave }) {
                   }
                 >
                   {message}
+                </span>
+              )}
+            </div>
+          </form>
+
+          <form className="profile-form" onSubmit={submitPassword}>
+            <label>
+              Current password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={passwords.currentPassword}
+                onChange={e => setPasswords({ ...passwords, currentPassword: e.target.value })}
+                required
+              />
+            </label>
+
+            <label>
+              New password (min 8 characters)
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={72}
+                value={passwords.newPassword}
+                onChange={e => setPasswords({ ...passwords, newPassword: e.target.value })}
+                required
+              />
+            </label>
+
+            <div className="profile-save-row">
+              <button className="blue-button" disabled={passwordBusy} type="submit">
+                {passwordBusy ? 'Saving…' : 'Change password'}
+              </button>
+
+              {passwordMessage && (
+                <span
+                  className={
+                    passwordMessage.includes('successfully')
+                      ? 'save-message success'
+                      : 'save-message'
+                  }
+                >
+                  {passwordMessage}
                 </span>
               )}
             </div>
@@ -3444,7 +3520,37 @@ function App() {
       payload
     )
 
-    setProfile(updated)
+    const { token, expiresIn, ...profileData } = updated
+
+    setProfile(profileData)
+
+    // A username change issues a new JWT (the old one names the old username).
+    if (token) {
+      const nextAuth = {
+        ...auth,
+        token,
+        expiresIn: expiresIn ?? auth.expiresIn,
+        username: profileData.username,
+        fullName: profileData.fullName,
+        email: profileData.email,
+      }
+
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth))
+      setAuth(nextAuth)
+    } else {
+      const nextAuth = {
+        ...auth,
+        fullName: profileData.fullName,
+        email: profileData.email,
+      }
+
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth))
+      setAuth(nextAuth)
+    }
+  }
+
+  const changePassword = async payload => {
+    await api.changePassword(auth.token, payload)
   }
 
   const createSupport = async payload => {
@@ -3622,6 +3728,7 @@ function App() {
             <ProfileView
               profile={profile || auth}
               onSave={saveProfile}
+              onChangePassword={changePassword}
             />
           )}
 
@@ -3668,5 +3775,7 @@ function App() {
 }
 
 export default App
+
+
 
 

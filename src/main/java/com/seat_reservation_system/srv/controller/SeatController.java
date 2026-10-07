@@ -2,6 +2,8 @@ package com.seat_reservation_system.srv.controller;
 
 import com.seat_reservation_system.srv.dto.SeatResponse;
 import com.seat_reservation_system.srv.service.SeatService;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,5 +17,10 @@ public class SeatController {
     public SeatController(SeatService seatService) { this.seatService = seatService; }
 
     @GetMapping
-    public List<SeatResponse> getSeats(@RequestParam(required = false) Long tripId) { return seatService.getAllSeats(tripId); }
+    public ResponseEntity<List<SeatResponse>> getSeats(@RequestParam(required = false) Long tripId) {
+        // Seat availability changes constantly: never let a browser or proxy serve a stale map.
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(seatService.getAllSeats(tripId));
+    }
 }

@@ -273,6 +273,13 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  changePassword: (token, payload) =>
+    request('/api/profile/password', {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify(payload),
+    }),
+
   getWallet: (token) =>
     request('/api/wallet', { token }),
 
@@ -299,5 +306,7 @@ export const api = {
   getNotifications: (token) =>
     request('/api/notifications', { token }),
 }
+
+
 
 

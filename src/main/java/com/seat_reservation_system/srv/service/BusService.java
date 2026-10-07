@@ -45,7 +45,16 @@ public class BusService {
 
         LocalDateTime now = AppTime.now();
 
-        return busTripRepository.findAllByOrderByDepartureTimeAsc()
+        LocalDateTime windowStart = targetDate.atStartOfDay();
+        if (windowStart.isBefore(now)) {
+            windowStart = now;
+        }
+
+        return busTripRepository
+                .findByDepartureTimeGreaterThanEqualAndDepartureTimeLessThanOrderByDepartureTimeAsc(
+                        windowStart,
+                        targetDate.plusDays(1).atStartOfDay()
+                )
                 .stream()
                 .filter(t ->
                         normalizedFrom.isBlank() ||
@@ -71,8 +80,14 @@ public class BusService {
     public List<BusTripResponse> popular() {
         LocalDateTime now = AppTime.now();
 
+        LocalDateTime dayStart = AppTime.today().plusDays(1).atStartOfDay();
+
         List<BusTrip> tomorrow =
-                busTripRepository.findAllByOrderByDepartureTimeAsc()
+                busTripRepository
+                        .findByDepartureTimeGreaterThanEqualAndDepartureTimeLessThanOrderByDepartureTimeAsc(
+                                dayStart.isBefore(now) ? now : dayStart,
+                                dayStart.plusDays(1)
+                        )
                         .stream()
                         .filter(t -> t.getDepartureTime().isAfter(now))
                         .filter(t ->
@@ -135,3 +150,5 @@ public class BusService {
         return trip;
     }
 }
+
+
