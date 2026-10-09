@@ -1,0 +1,16 @@
+<div class="view">
+  <div class="page-header"><div><span class="eyebrow">SEARCH BUSES</span><h1>Find your next bus</h1><p>Compare departures, prices and amenities in one place.</p></div><span class="result-count">{{ data.loadingSearch ? 'Searching…' : trips.length + ' buses' }}</span></div>
+  <app-search-form [initial]="data.searchParams" (search)="search($event)" (passengerChange)="data.setPassengerCount($event)" />
+  <div *ngIf="data.loadingSearch || data.actionBusy" class="loading-card"><app-icon name="bus" [size]="28" /> Loading the best routes…</div>
+  <div *ngIf="!data.loadingSearch && data.hasSearched && !trips.length" class="empty-card"><span><app-icon name="search" [size]="26" /></span><h3>No buses found</h3><p>Try another route or date. The catalogue covers several cities and the next 7 days.</p></div>
+  <div *ngIf="!data.loadingSearch && trips.length" class="bus-list">
+    <article *ngFor="let trip of trips" class="bus-card">
+      <div class="bus-operator"><span class="operator-logo"><app-icon name="bus" [size]="22" /></span><div><strong>{{ trip.operatorName }}</strong><small>{{ trip.busType }}</small></div></div>
+      <div class="bus-time"><div><strong>{{ formatTime(trip.departureTime) }}</strong><small>{{ trip.fromCity }}</small></div><div class="duration-line"><span>{{ duration(trip.durationMinutes) }}</span><i></i><small>Direct</small></div><div class="align-right"><strong>{{ formatTime(trip.arrivalTime) }}</strong><small>{{ trip.toCity }}</small></div></div>
+      <div class="bus-features"><span><app-icon name="star" [size]="13" /> {{ trip.rating || '—' }}</span><span><app-icon name="shield" [size]="13" /> AC</span><span><app-icon name="phone" [size]="13" /> Charging</span></div>
+      <div class="bus-price"><span><small>per seat</small><strong>{{ money(trip.price) }}</strong></span><button class="blue-button" type="button" [disabled]="data.actionBusy" (click)="chooseTrip(trip)">Select Seats</button></div>
+    </article>
+  </div>
+  <div *ngIf="!data.loadingSearch && !data.hasSearched && !trips.length" class="empty-card"><h3>No popular routes available</h3><p>Search a route to see current bus options.</p></div>
+</div>
+

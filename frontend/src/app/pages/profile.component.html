@@ -1,0 +1,18 @@
+<div class="view">
+  <div class="page-header"><div><span class="eyebrow">PROFILE</span><h1>Your profile</h1><p>Keep your passenger details ready for every trip.</p></div></div>
+  <div class="profile-layout">
+    <section class="panel-card profile-card">
+      <div class="profile-banner"><div class="profile-big-avatar">{{ (form.controls.fullName.value || form.controls.username.value || 'S').slice(0,1).toUpperCase() }}</div><div><h2>{{ form.controls.fullName.value || form.controls.username.value }}</h2><p>{{ form.controls.email.value || 'Add your email' }}</p></div><span class="member-pill">Member since {{ data.profile?.createdAt ? formatDate(data.profile?.createdAt, { month: 'short', year: 'numeric' }) : 'today' }}</span></div>
+      <form class="profile-form" [formGroup]="form" (ngSubmit)="save()">
+        <label>Full Name<input formControlName="fullName" autocomplete="name"></label>
+        <label>Email<input type="email" formControlName="email" autocomplete="email"></label>
+        <label>Phone<input formControlName="phone" placeholder="+91 98765 43210" autocomplete="tel"></label>
+        <label>Username<input formControlName="username" minlength="3" maxlength="50" pattern="[A-Za-z0-9._-]+" autocomplete="username" autocapitalize="none" required></label>
+        <div class="profile-save-row"><button class="blue-button" type="submit" [disabled]="busy">{{ busy ? 'Saving…' : 'Save changes' }}</button><span *ngIf="message" class="save-message" [class.success]="message.includes('successfully')">{{ message }}</span></div>
+      </form>
+      <form class="profile-form" [formGroup]="passwordForm" (ngSubmit)="changePassword()"><h3>Change password</h3><label>Current password<input type="password" formControlName="currentPassword" autocomplete="current-password" required></label><label>New password (min 8 characters)<input type="password" formControlName="newPassword" minlength="8" maxlength="72" autocomplete="new-password" required></label><div class="profile-save-row"><button class="blue-button" type="submit" [disabled]="passwordBusy">{{ passwordBusy ? 'Saving…' : 'Change password' }}</button><span *ngIf="passwordMessage" class="save-message" [class.success]="passwordMessage.includes('successfully')">{{ passwordMessage }}</span></div></form>
+    </section>
+    <aside class="profile-side"><div class="panel-card profile-stat"><span><app-icon name="ticket" [size]="19" /></span><div><strong>{{ money(data.profile?.walletBalance ?? data.wallet.balance) }}</strong><small>Wallet balance</small></div></div><div class="panel-card profile-stat"><span><app-icon name="shield" [size]="19" /></span><div><strong>Protected</strong><small>Account security</small></div></div><div class="panel-card profile-stat"><span><app-icon name="phone" [size]="19" /></span><div><strong>Ready to travel</strong><small>Passenger details</small></div></div></aside>
+  </div>
+</div>
+

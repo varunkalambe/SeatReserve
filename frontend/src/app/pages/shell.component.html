@@ -1,0 +1,58 @@
+<div class="application-shell">
+  <aside class="sidebar">
+    <a class="brand brand-compact" routerLink="/home" aria-label="SeatReserve home">
+      <span class="brand-icon"><app-icon name="bus" [size]="22" [strokeWidth]="2.2" /></span>
+      <span><strong>Seat<span>Reserve</span></strong></span>
+    </a>
+    <nav>
+      <a *ngFor="let item of navItems" class="nav-item" [routerLink]="item.path" routerLinkActive="active">
+        <app-icon [name]="item.icon" [size]="18" /><span>{{ item.label }}</span>
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-promo"><span>New routes</span><strong>Discover your next trip.</strong><button type="button" routerLink="/search">Explore <app-icon name="arrow" [size]="14" /></button></div>
+      <button type="button" class="nav-item logout" (click)="signOut()"><app-icon name="logout" [size]="18" /><span>Sign out</span></button>
+    </div>
+  </aside>
+
+  <div class="app-main">
+    <header class="topbar-app">
+      <div class="mobile-brand"><a class="brand brand-compact" routerLink="/home"><span class="brand-icon"><app-icon name="bus" [size]="22" /></span><span><strong>Seat<span>Reserve</span></strong></span></a></div>
+      <form class="global-search" (ngSubmit)="searchFromTopbar()"><app-icon name="search" [size]="17" /><input name="topSearch" [(ngModel)]="topSearch" placeholder="Search routes, destinations…"><kbd>Enter</kbd></form>
+      <div class="topbar-actions">
+        <button type="button" class="icon-button notification-button" (click)="toggleNotifications()" aria-label="Notifications"><app-icon name="bell" [size]="19" /><span *ngIf="data.notifications.length" class="notification-dot"></span></button>
+        <button type="button" class="profile-chip" routerLink="/profile"><span class="avatar-photo">{{ (data.profile?.fullName || data.profile?.username || auth.auth?.fullName || auth.auth?.username || 'S').slice(0,1).toUpperCase() }}</span><span class="profile-name">{{ data.profile?.fullName || data.profile?.username || auth.auth?.fullName || 'My profile' }}</span><app-icon name="chevron" [size]="15" /></button>
+      </div>
+    </header>
+
+    <section *ngIf="data.showNotifications" class="notification-panel" aria-label="Notifications">
+      <div class="panel-title-row"><div><span class="eyebrow">NOTIFICATIONS</span><h3>Latest updates</h3></div><button type="button" class="icon-button" (click)="closeNotifications()" aria-label="Close notifications"><app-icon name="close" [size]="16" /></button></div>
+      <div *ngIf="!data.notifications.length" class="empty-state compact"><app-icon name="bell" [size]="23" /><span>No new updates.</span></div>
+      <div *ngIf="data.notifications.length" class="notification-list"><div *ngFor="let note of data.notifications" class="notification-item"><span class="notification-type" [class.success]="note.type === 'success'" [class.warning]="note.type === 'warning'"><app-icon [name]="note.type === 'success' ? 'check' : note.type === 'warning' ? 'clock' : 'bell'" [size]="15" /></span><div><strong>{{ note.title }}</strong><p>{{ note.message }}</p><small>{{ formatDate(note.createdAt) }} · {{ formatTime(note.createdAt) }}</small></div></div></div>
+    </section>
+
+    <div *ngIf="data.globalError" class="global-alert" role="alert"><app-icon name="help" [size]="17" /><span>{{ data.globalError }}</span><button type="button" (click)="data.globalError = ''" aria-label="Dismiss message"><app-icon name="close" [size]="15" /></button></div>
+    <main class="app-content">
+      <router-outlet />
+      <div class="mobile-bottom-nav">
+        <a *ngFor="let item of navItems.slice(0, 1)" [routerLink]="item.path" routerLinkActive="active"><app-icon [name]="item.icon" [size]="19" /><span>Home</span></a>
+        <a routerLink="/search" routerLinkActive="active"><app-icon name="search" [size]="19" /><span>Search</span></a>
+        <a routerLink="/bookings" routerLinkActive="active"><app-icon name="ticket" [size]="19" /><span>Bookings</span></a>
+        <a routerLink="/wallet" routerLinkActive="active"><app-icon name="wallet" [size]="19" /><span>Wallet</span></a>
+        <a routerLink="/profile" routerLinkActive="active"><app-icon name="user" [size]="19" /><span>Profile</span></a>
+      </div>
+    </main>
+  </div>
+
+  <div *ngIf="data.ticket as ticket" class="modal-backdrop" (click)="closeTicket()">
+    <section class="ticket-modal" role="dialog" aria-modal="true" aria-label="E-ticket" (click)="$event.stopPropagation()">
+      <button class="modal-close" type="button" (click)="closeTicket()" aria-label="Close ticket"><app-icon name="close" [size]="18" /></button>
+      <div class="ticket-brand"><span class="brand-icon"><app-icon name="bus" [size]="22" /></span><span class="ticket-label">E-TICKET</span></div>
+      <div class="ticket-route"><div><small>FROM</small><strong>{{ ticket.fromCity }}</strong><span>{{ formatTime(ticket.departureTime) }}</span></div><app-icon name="arrow" [size]="22" /><div class="align-right"><small>TO</small><strong>{{ ticket.toCity }}</strong><span>{{ formatTime(ticket.arrivalTime) }}</span></div></div>
+      <div class="ticket-code-box"><strong>{{ ticket.pnr }}</strong><small>PNR / BOOKING REFERENCE</small></div>
+      <div class="ticket-details"><div><span>Passenger</span><strong>{{ ticket.passengerName }}</strong></div><div><span>Bus</span><strong>{{ ticket.operatorName }}</strong></div><div><span>Seat</span><strong>{{ ticket.seatNumber }}</strong></div><div><span>Total fare</span><strong>{{ money(ticket.totalFare) }}</strong></div><div><span>PNR</span><strong>{{ ticket.pnr }}</strong></div><div><span>Payment</span><strong>{{ ticket.paymentMethod }}</strong></div></div>
+      <button class="blue-button wide" type="button" (click)="printTicket()"><app-icon name="download" [size]="16" /> Print / save ticket</button>
+    </section>
+  </div>
+</div>
+

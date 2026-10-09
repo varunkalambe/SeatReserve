@@ -1,0 +1,19 @@
+<div class="view">
+  <div class="page-header"><div><span class="eyebrow">WALLET</span><h1>Travel wallet</h1><p>Use wallet funds at checkout or receive eligible cancellation refunds here.</p></div></div>
+  <div class="wallet-grid">
+    <section class="wallet-hero"><div><span>Available balance</span><strong>{{ money(data.wallet.balance) }}</strong><p>Wallet deductions and refunds are recorded as server-side ledger transactions.</p></div><div class="wallet-orbit"><app-icon name="wallet" [size]="48" /></div></section>
+    <section class="panel-card topup-card"><span class="eyebrow">WALLET FUNDING</span><h3>{{ topUpEnabled ? 'Add money' : 'Top-up unavailable' }}</h3>
+      <ng-container *ngIf="topUpEnabled; else disabledTopUp"><div class="topup-buttons"><button *ngFor="let amount of [500,1000,2000,5000]" type="button" [disabled]="busy || amount > limitFor" (click)="add(amount)">{{ money(amount) }}</button></div>
+        <form [formGroup]="form" (ngSubmit)="submitCustom()"><div class="topup-buttons"><input type="number" inputmode="decimal" formControlName="amount" [min]="minTopUp" [max]="limitFor" step="1" placeholder="Custom amount" aria-label="Custom top-up amount" [disabled]="busy"><button type="submit" [disabled]="busy || form.invalid">{{ busy ? 'Adding…' : 'Add' }}</button></div></form>
+        <small>Instant top-up, {{ money(minTopUp) }} to {{ money(maxTopUp) }} per transaction<span *ngIf="remainingToday !== null"> · {{ money(remainingToday) }} left today</span>. Payments are simulated until a real payment gateway is connected.</small>
+      </ng-container>
+      <ng-template #disabledTopUp><small>Wallet top-up is currently switched off on the server. Refunds from cancelled bookings are still credited to your wallet.</small></ng-template>
+      <div *ngIf="error" class="alert error">{{ error }}</div><div *ngIf="success" class="alert" role="status" style="background:#f0faf4;border:1px solid #c5e8d1;color:#2f7d4f;margin-top:10px">{{ success }}</div>
+    </section>
+    <section class="panel-card wallet-transactions"><div class="panel-title-row"><div><h3>Recent activity</h3><p>Your latest wallet movements.</p></div></div><div class="transaction-list">
+      <div *ngIf="!data.transactions.length" class="empty-state compact"><app-icon name="wallet" [size]="24" /><span>No wallet activity yet.</span></div>
+      <div *ngFor="let item of data.transactions" class="transaction-row"><span class="transaction-icon" [class.credit]="item.type === 'CREDIT'" [class.debit]="item.type !== 'CREDIT'">{{ item.type === 'CREDIT' ? '+' : '−' }}</span><div><strong>{{ item.description }}</strong><small>{{ formatDate(item.createdAt) }} · {{ formatTime(item.createdAt) }}</small></div><b [class.positive]="item.type === 'CREDIT'" [class.negative]="item.type !== 'CREDIT'">{{ item.type === 'CREDIT' ? '+' : '−' }}{{ money(abs(item.amount)) }}</b></div>
+    </div></section>
+  </div>
+</div>
+

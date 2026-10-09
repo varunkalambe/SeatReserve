@@ -1,0 +1,31 @@
+<main class="auth-screen">
+  <section class="auth-showcase">
+    <div class="auth-showcase-top">
+      <div class="brand"><span class="brand-icon"><app-icon name="bus" [size]="22" [strokeWidth]="2.2" /></span><span><strong>Seat<span>Reserve</span></strong><small>Travel Smarter. Together.</small></span></div>
+    </div>
+    <div class="auth-showcase-copy"><span class="eyebrow">BUS TRAVEL, REIMAGINED</span><h1>Book your journey<br><em>hassle-free.</em></h1><p>Safe. Simple. Reliable.</p></div>
+    <div class="auth-road"><div class="mountain mountain-one"></div><div class="mountain mountain-two"></div><div class="hero-bus-large"><app-icon name="bus" [size]="160" [strokeWidth]="1.15" /></div></div>
+    <div class="auth-benefits">
+      <div><span><app-icon name="clock" /></span><strong>Real-time</strong><small>Availability</small></div>
+      <div><span><app-icon name="shield" /></span><strong>Secure</strong><small>Payments</small></div>
+      <div><span><app-icon name="check" /></span><strong>Instant</strong><small>Confirmation</small></div>
+      <div><span><app-icon name="ticket" /></span><strong>Easy</strong><small>Bookings</small></div>
+    </div>
+  </section>
+  <section class="auth-panel-wrap">
+    <div class="auth-card">
+      <div class="brand brand-compact"><span class="brand-icon"><app-icon name="bus" [size]="22" [strokeWidth]="2.2" /></span><span><strong>Seat<span>Reserve</span></strong></span></div>
+      <div class="auth-tabs"><button type="button" [class.active]="mode === 'login'" (click)="toggleMode('login')">Log in</button><button type="button" [class.active]="mode === 'register'" (click)="toggleMode('register')">Sign up</button></div>
+      <div class="auth-title"><h2>{{ mode === 'login' ? 'Welcome back' : 'Create your account' }}</h2><p>{{ mode === 'login' ? 'Log in to continue your journey' : 'Join us and start your journey' }}</p></div>
+      <div *ngIf="error" class="alert error" role="alert">{{ error }}</div>
+      <form class="form-stack" [formGroup]="form" (ngSubmit)="submit()">
+        <label *ngIf="mode === 'register'">Full Name<input formControlName="fullName" placeholder="Your full name" autocomplete="name" [required]="mode === 'register'"></label>
+        <label>Email<input type="email" formControlName="email" placeholder="you@example.com" autocomplete="email" required></label>
+        <label>Password<div class="input-with-icon"><input type="password" formControlName="password" [placeholder]="mode === 'login' ? 'Enter your password' : 'Create a strong password'" autocomplete="current-password" minlength="8" required><app-icon name="shield" [size]="17" /></div></label>
+        <button class="blue-button wide" [disabled]="busy" type="submit">{{ busy ? 'Please wait…' : (mode === 'login' ? 'Login' : 'Sign Up') }}</button>
+      </form>
+      <p class="auth-foot">{{ mode === 'login' ? "Don't have an account?" : 'Already have an account?' }} <button type="button" class="link-button" (click)="toggleMode()">{{ mode === 'login' ? 'Sign up' : 'Log in' }}</button></p>
+    </div>
+  </section>
+</main>
+

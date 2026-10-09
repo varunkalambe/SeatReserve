@@ -1,0 +1,26 @@
+<div class="view home-view">
+  <section class="hero-banner">
+    <div class="hero-banner-copy"><span class="eyebrow light">JOURNEY STARTS HERE</span><h1>Travel to new <span>destinations.</span></h1><p>Discover comfortable bus journeys at prices you'll love.</p></div>
+    <div class="hero-graphic"><div class="hero-sun"></div><div class="hero-mountain m1"></div><div class="hero-mountain m2"></div><div class="hero-road"></div><app-icon name="bus" [size]="130" [strokeWidth]="1.1" /></div>
+  </section>
+
+  <app-search-form [initial]="data.searchParams" (search)="search($event)" (passengerChange)="data.setPassengerCount($event)" />
+
+  <section class="section-block">
+    <div class="section-heading"><div><span class="eyebrow">POPULAR ROUTES</span><h2>Plan your next escape</h2></div><button type="button" class="link-button" (click)="goSearch()">View all <app-icon name="arrow" [size]="15" /></button></div>
+    <div class="route-grid">
+      <button *ngFor="let trip of data.popularTrips.slice(0, 4)" class="route-card" type="button" (click)="chooseTrip(trip)">
+        <div class="route-image route-image-1"><span>{{ trip.fromCity.slice(0,1) }}{{ trip.toCity.slice(0,1) }}</span></div>
+        <div class="route-card-copy"><strong>{{ trip.fromCity }} → {{ trip.toCity }}</strong><span>From {{ money(trip.price) }}</span><small>{{ duration(trip.durationMinutes) }}</small></div>
+      </button>
+      <div *ngIf="!data.popularTrips.length" class="empty-card"><span><app-icon name="bus" [size]="26" /></span><h3>Popular routes are loading</h3><p>Use the search panel above to find available buses.</p></div>
+    </div>
+  </section>
+
+  <section class="benefit-grid">
+    <div class="benefit-card"><span class="benefit-icon"><app-icon name="shield" /></span><div><strong>Safe &amp; secure</strong><p>Trusted operators, verified buses and protected payments.</p></div></div>
+    <div class="benefit-card"><span class="benefit-icon"><app-icon name="clock" /></span><div><strong>Live availability</strong><p>See the latest seat status while you plan your trip.</p></div></div>
+    <div class="benefit-card"><span class="benefit-icon"><app-icon name="ticket" /></span><div><strong>Instant tickets</strong><p>Get your digital ticket right after payment.</p></div></div>
+  </section>
+</div>
+

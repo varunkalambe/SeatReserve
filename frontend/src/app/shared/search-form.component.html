@@ -1,0 +1,48 @@
+<div class="search-box sb">
+  <div class="search-toggle"><button class="trip-toggle active" type="button">One Way</button></div>
+  <form [formGroup]="form" (ngSubmit)="submit()">
+    <div class="sb-grid">
+      <div class="sb-field">
+        <label class="sb-label" for="from-city">From</label>
+        <div class="sb-control">
+          <app-icon name="map" [size]="16" />
+          <input id="from-city" formControlName="from" list="seatreserve-cities" autocomplete="off" placeholder="Leaving from">
+        </div>
+      </div>
+      <button class="sb-swap" type="button" aria-label="Swap From and To" title="Swap cities" (click)="swapCities()"><app-icon name="swap" [size]="16" /></button>
+      <div class="sb-field">
+        <label class="sb-label" for="to-city">To</label>
+        <div class="sb-control">
+          <app-icon name="map" [size]="16" />
+          <input id="to-city" formControlName="to" list="seatreserve-cities" autocomplete="off" placeholder="Going to">
+        </div>
+      </div>
+      <datalist id="seatreserve-cities"><option *ngFor="let city of cities" [value]="city"></option></datalist>
+      <div class="sb-rest">
+        <div class="sb-field">
+          <label class="sb-label" for="sb-date">Date</label>
+          <div class="sb-control"><app-icon name="calendar" [size]="16" /><input id="sb-date" type="date" formControlName="date" [min]="today"></div>
+        </div>
+        <div class="sb-field">
+          <span class="sb-label">Passengers</span>
+          <div class="sb-control sb-stepper">
+            <app-icon name="user" [size]="16" />
+            <div class="sb-stepper-controls">
+              <button type="button" aria-label="Fewer passengers" [disabled]="passengers <= 1" (click)="changePassengers(-1)">−</button>
+              <strong aria-live="polite">{{ passengers }}</strong>
+              <button type="button" aria-label="More passengers" [disabled]="passengers >= 6" (click)="changePassengers(1)">+</button>
+            </div>
+          </div>
+        </div>
+        <button class="blue-button sb-submit" type="submit"><app-icon name="search" [size]="16" /> Search Buses</button>
+      </div>
+    </div>
+    <div class="sb-quick">
+      <button type="button" class="sb-chip" [class.active]="form.controls.date.value === today" (click)="setDate(today)">Today</button>
+      <button type="button" class="sb-chip" [class.active]="form.controls.date.value === tomorrow" (click)="setDate(tomorrow)">Tomorrow</button>
+      <button *ngIf="form.controls.from.value || form.controls.to.value" type="button" class="sb-clear-all" (click)="clearCities()"><app-icon name="close" [size]="13" /> Clear cities</button>
+    </div>
+    <p *ngIf="error" class="sb-error" role="alert">{{ error }}</p>
+  </form>
+</div>
+
