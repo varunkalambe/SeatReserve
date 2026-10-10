@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { ApiService } from './core/api.service';
 
 @Component({
   selector: 'app-root',
@@ -7,4 +8,9 @@ import { RouterOutlet } from '@angular/router';
   imports: [RouterOutlet],
   template: '<router-outlet />',
 })
-export class AppComponent {}
+export class AppComponent {
+  constructor(api: ApiService) {
+    // Start waking the (possibly sleeping) Render backend the moment the page opens.
+    void api.ensureAwake().catch(() => undefined);
+  }
+}

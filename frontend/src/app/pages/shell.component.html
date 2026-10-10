@@ -31,6 +31,7 @@
       <div *ngIf="data.notifications.length" class="notification-list"><div *ngFor="let note of data.notifications" class="notification-item"><span class="notification-type" [class.success]="note.type === 'success'" [class.warning]="note.type === 'warning'"><app-icon [name]="note.type === 'success' ? 'check' : note.type === 'warning' ? 'clock' : 'bell'" [size]="15" /></span><div><strong>{{ note.title }}</strong><p>{{ note.message }}</p><small>{{ formatDate(note.createdAt) }} · {{ formatTime(note.createdAt) }}</small></div></div></div>
     </section>
 
+    <div *ngIf="api.warmingUp" class="global-alert" role="status"><app-icon name="clock" [size]="17" /><span>Waking up the server… the first load after a quiet period can take up to 2–3 minutes. Your data will appear automatically.</span></div>
     <div *ngIf="data.globalError" class="global-alert" role="alert"><app-icon name="help" [size]="17" /><span>{{ data.globalError }}</span><button type="button" (click)="data.globalError = ''" aria-label="Dismiss message"><app-icon name="close" [size]="15" /></button></div>
     <main class="app-content">
       <router-outlet />
@@ -55,4 +56,3 @@
     </section>
   </div>
 </div>
-

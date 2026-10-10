@@ -1,11 +1,28 @@
 import { Injectable } from '@angular/core';
+import { Subject } from 'rxjs';
 import { AuthResponse } from './models';
 
 const AUTH_STORAGE_KEY = 'seat-reserve-auth';
 
+/** Returns the JWT expiry in ms, or null when the token is not a decodable JWT. */
+function jwtExpiryMs(token: string): number | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const json = atob(part.replace(/-/g, '+').replace(/_/g, '/'));
+    const exp = (JSON.parse(json) as { exp?: number }).exp;
+    return typeof exp === 'number' ? exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private currentAuth: AuthResponse | null = this.loadStoredAuth();
+
+  /** Emits whenever the session ends so in-flight requests/retries can be cancelled. */
+  readonly loggedOut$ = new Subject<void>();
 
   get auth(): AuthResponse | null {
     return this.currentAuth;
@@ -15,8 +32,16 @@ export class AuthService {
     return this.currentAuth?.token ?? null;
   }
 
+  /** True only for a stored token that has not expired (expired tokens are dropped immediately). */
   get isAuthenticated(): boolean {
-    return Boolean(this.currentAuth?.token);
+    const token = this.currentAuth?.token;
+    if (!token) return false;
+    const expiry = jwtExpiryMs(token);
+    if (expiry !== null && expiry <= Date.now()) {
+      this.logout();
+      return false;
+    }
+    return true;
   }
 
   save(auth: AuthResponse): void {
@@ -34,6 +59,7 @@ export class AuthService {
   }
 
   logout(): void {
+    const hadSession = this.currentAuth !== null;
     this.currentAuth = null;
     try {
       localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -41,6 +67,7 @@ export class AuthService {
     } catch {
       // No-op when browser storage is unavailable.
     }
+    if (hadSession) this.loggedOut$.next();
   }
 
   private loadStoredAuth(): AuthResponse | null {

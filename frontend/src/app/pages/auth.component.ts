@@ -21,7 +21,7 @@ export class AuthComponent {
     password: ['', [Validators.required, Validators.minLength(8)]],
   });
 
-  constructor(private readonly fb: FormBuilder, private readonly api: ApiService, private readonly auth: AuthService, private readonly router: Router) {}
+  constructor(private readonly fb: FormBuilder, readonly api: ApiService, private readonly auth: AuthService, private readonly router: Router) {}
 
   toggleMode(mode?: 'login' | 'register'): void {
     this.mode = mode ?? (this.mode === 'login' ? 'register' : 'login');
@@ -49,4 +49,3 @@ export class AuthComponent {
     }
   }
 }
-

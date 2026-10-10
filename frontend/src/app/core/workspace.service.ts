@@ -78,17 +78,26 @@ export class WorkspaceService {
   constructor(readonly api: ApiService, readonly auth: AuthService) {}
 
   async loadInitial(): Promise<void> {
-    const [profile, popular, reservations, wallet, transactions, tickets, notifications] = await Promise.all([
+    // allSettled: one slow or failing endpoint must not blank the whole dashboard.
+    const [profile, popular, reservations, wallet, transactions, tickets, notifications] = await Promise.allSettled([
       this.api.getProfile(), this.api.popularBuses(), this.api.getMyReservations(),
       this.api.getWallet(), this.api.getWalletTransactions(), this.api.getSupportTickets(), this.api.getNotifications(),
     ]);
-    this.profile = profile;
-    this.popularTrips = popular || [];
-    this.reservations = stampReservations(reservations || []);
-    this.wallet = wallet || this.wallet;
-    this.transactions = transactions || [];
-    this.supportTickets = tickets || [];
-    this.notifications = notifications || [];
+    const all = [profile, popular, reservations, wallet, transactions, tickets, notifications];
+    const unauthorized = all.find(r => r.status === 'rejected' && (r.reason as { status?: number })?.status === 401) as PromiseRejectedResult | undefined;
+    if (unauthorized) throw unauthorized.reason;
+    if (profile.status === 'rejected') throw profile.reason;
+
+    this.profile = profile.value;
+    if (popular.status === 'fulfilled') this.popularTrips = popular.value || [];
+    if (reservations.status === 'fulfilled') this.reservations = stampReservations(reservations.value || []);
+    if (wallet.status === 'fulfilled') this.wallet = wallet.value || this.wallet;
+    if (transactions.status === 'fulfilled') this.transactions = transactions.value || [];
+    if (tickets.status === 'fulfilled') this.supportTickets = tickets.value || [];
+    if (notifications.status === 'fulfilled') this.notifications = notifications.value || [];
+
+    const failed = all.find(r => r.status === 'rejected') as PromiseRejectedResult | undefined;
+    if (failed) this.globalError = `Some data could not be loaded (${(failed.reason as Error)?.message || 'network error'}). It will refresh automatically.`;
   }
 
   async refreshReservations(): Promise<void> { this.reservations = stampReservations(await this.api.getMyReservations() || []); }
@@ -272,4 +281,3 @@ export class WorkspaceService {
     this.ticket = null; this.globalError = ''; this.bookingNotice = null; this.showNotifications = false;
   }
 }
-

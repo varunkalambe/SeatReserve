@@ -33,6 +33,12 @@ public class RedissonConfig {
                                         ":" +
                                         port
                         )
+                        .setConnectTimeout(10_000)
+                        .setTimeout(5_000)
+                        .setRetryAttempts(3)
+                        // Render Key Value drops idle sockets; ping keeps them alive instead of failing the first request.
+                        .setPingConnectionInterval(30_000)
+                        .setKeepAlive(true)
                         .setConnectionMinimumIdleSize(2)
                         .setConnectionPoolSize(10)
                         .setSubscriptionConnectionMinimumIdleSize(1)

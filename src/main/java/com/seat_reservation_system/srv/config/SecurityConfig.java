@@ -150,7 +150,7 @@ public class SecurityConfig {
         CorsConfiguration configuration =
                 new CorsConfiguration();
 
-        List<String> originPatterns =
+        java.util.List<String> originPatterns =
                 Arrays.stream(
                                 allowedOrigins.split(",")
                         )

@@ -17,6 +17,7 @@
       <div class="brand brand-compact"><span class="brand-icon"><app-icon name="bus" [size]="22" [strokeWidth]="2.2" /></span><span><strong>Seat<span>Reserve</span></strong></span></div>
       <div class="auth-tabs"><button type="button" [class.active]="mode === 'login'" (click)="toggleMode('login')">Log in</button><button type="button" [class.active]="mode === 'register'" (click)="toggleMode('register')">Sign up</button></div>
       <div class="auth-title"><h2>{{ mode === 'login' ? 'Welcome back' : 'Create your account' }}</h2><p>{{ mode === 'login' ? 'Log in to continue your journey' : 'Join us and start your journey' }}</p></div>
+      <div *ngIf="api.warmingUp" class="alert" role="status">Waking up the server… this can take up to 2–3 minutes after a quiet period. You can log in as soon as it is ready.</div>
       <div *ngIf="error" class="alert error" role="alert">{{ error }}</div>
       <form class="form-stack" [formGroup]="form" (ngSubmit)="submit()">
         <label *ngIf="mode === 'register'">Full Name<input formControlName="fullName" placeholder="Your full name" autocomplete="name" [required]="mode === 'register'"></label>
@@ -28,4 +29,3 @@
     </div>
   </section>
 </main>
-

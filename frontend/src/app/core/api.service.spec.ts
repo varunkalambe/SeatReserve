@@ -4,6 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { ApiService } from './api.service';
 import { authInterceptor } from './auth.interceptor';
+import { AuthService } from './auth.service';
 
 /** Each case asserts the exact method, path, query and body the Spring controllers/DTOs expect. */
 describe('ApiService backend contract', () => {
@@ -13,6 +14,7 @@ describe('ApiService backend contract', () => {
   beforeEach(() => {
     localStorage.clear();
     TestBed.configureTestingModule({ providers: [provideRouter([]), provideHttpClient(withInterceptors([authInterceptor])), provideHttpClientTesting()] });
+    TestBed.inject(AuthService).save({ token: 'jwt-test', username: 'u', expiresIn: 1, fullName: 'U', email: 'u@x.io' });
     api = TestBed.inject(ApiService);
     backend = TestBed.inject(HttpTestingController);
   });

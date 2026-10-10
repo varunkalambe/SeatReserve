@@ -28,14 +28,17 @@ export class ShellComponent implements OnInit {
   readonly formatTime = formatTime;
   readonly money = money;
   topSearch = '';
+  private polling = false;
 
-  constructor(readonly data: WorkspaceService, private readonly api: ApiService, readonly auth: AuthService, private readonly router: Router) {}
+  constructor(readonly data: WorkspaceService, readonly api: ApiService, readonly auth: AuthService, private readonly router: Router) {}
 
   ngOnInit(): void {
     void this.load();
     interval(7000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
-      if (!this.auth.isAuthenticated) return;
-      this.data.pollRefresh().catch(error => this.handleError(error));
+      // Skip while signed out, while the backend is waking, or while the previous poll is still running.
+      if (!this.auth.isAuthenticated || this.api.warmingUp || this.polling) return;
+      this.polling = true;
+      this.data.pollRefresh().catch(error => this.handleError(error)).finally(() => { this.polling = false; });
     });
   }
 
@@ -46,6 +49,7 @@ export class ShellComponent implements OnInit {
 
   private async load(): Promise<void> {
     try {
+      await this.api.ensureAwake();
       await this.data.loadInitial();
     } catch (error) {
       this.handleError(error);
@@ -57,6 +61,7 @@ export class ShellComponent implements OnInit {
     if (failure?.status === 401) {
       this.signOut();
     } else {
+      if (failure?.status === 0 || failure?.status === 503) { this.data.globalError ||= failure?.message || ''; return; }
       this.data.globalError = failure?.message || 'Something went wrong. Please try again.';
     }
   }
@@ -82,4 +87,3 @@ export class ShellComponent implements OnInit {
   closeTicket(): void { this.data.ticket = null; }
   printTicket(): void { window.print(); }
 }
-

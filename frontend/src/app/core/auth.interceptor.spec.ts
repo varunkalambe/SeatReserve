@@ -72,6 +72,13 @@ describe('authInterceptor', () => {
     expect(router.navigate).not.toHaveBeenCalled();
   });
 
+  it('rejects protected calls locally with a 401 (no network request) while signed out', () => {
+    let status = 0;
+    http.get('/api/wallet').subscribe({ error: e => { status = e.status; } });
+    backend.expectNone('/api/wallet');
+    expect(status).toBe(401);
+  });
+
   it('keeps the session on non-401 errors such as 409 or 500', () => {
     auth.save({ token: 'jwt-1', username: 'u', expiresIn: 1, fullName: 'U', email: 'u@x.io' });
     http.post('/api/reservations/batch', {}).subscribe({ error: () => undefined });
