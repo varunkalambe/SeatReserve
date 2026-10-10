@@ -19,6 +19,8 @@ export class ProfileComponent implements OnInit {
   message = '';
   passwordBusy = false;
   passwordMessage = '';
+  showCurrentPassword = false;
+  showNewPassword = false;
   readonly form = this.fb.nonNullable.group({
     username: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(50), Validators.pattern(/^[A-Za-z0-9._-]+$/)]],
     fullName: ['', Validators.maxLength(100)],
@@ -54,7 +56,7 @@ export class ProfileComponent implements OnInit {
     this.passwordMessage = '';
     if (this.passwordForm.invalid) { this.passwordForm.markAllAsTouched(); this.passwordMessage = 'Enter your current password and a new password with at least 8 characters.'; return; }
     this.passwordBusy = true;
-    try { await this.data.changePassword(this.passwordForm.getRawValue()); this.passwordForm.reset(); this.passwordMessage = 'Password changed successfully.'; }
+    try { await this.data.changePassword(this.passwordForm.getRawValue()); this.passwordForm.reset(); this.showCurrentPassword = false; this.showNewPassword = false; this.passwordMessage = 'Password changed successfully.'; }
     catch (error) { this.passwordMessage = (error as Error).message || 'Password could not be changed.'; }
     finally { this.passwordBusy = false; }
   }

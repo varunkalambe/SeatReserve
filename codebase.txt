@@ -1,7 +1,7 @@
 ====================================================================================================
 PROJECT CODEBASE EXPORT
 Project root: D:\Downloads\srv\srv
-Files discovered: 152
+Files discovered: 154
 ====================================================================================================
 
 
@@ -109,67 +109,49 @@ FILE: combined_codebase.txt
 FILE: DEPLOY_CHECKLIST.md
 ====================================================================================================
 
-# SeatReserve – what was wrong, what changed, and every env var
+# SeatReserve – environment checklist
 
-## Root causes found in your logs
-1. `ERR_CONNECTION_RESET` – Render free instance was asleep/booting. Your boot log shows **162 s** (Tomcat up only at 07:22:35).
-   Every request fired during that window is reset by the proxy. The old frontend retried a GET only 2x over ~4 s.
-2. `401 … [token=no]` flood – after the first 401/logout the old interceptor still *sent* queued/retried
-   requests **without** a token (`wallet`, `profile`, `notifications`… every ~1 s). Backend was behaving correctly.
-3. JVM defaults on a 512 MB / 0.1 CPU instance (≈128 MB heap, parallel GC/JIT) made the boot far slower than needed.
-4. `scripts/generate-api-base.mjs` is called by `npm run build` but was missing from the export, so it is included here.
-5. Neon closes idle sockets; Hikari had no max-lifetime/keepalive, so the first query after a quiet period could fail.
+## Render → Web Service `seatreserve-backend` → Environment
+| Key | Value | Required |
+|---|---|---|
+| SPRING_DATASOURCE_URL | `jdbc:postgresql://ep-billowing-wildflower-b3b09wm3.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require` (direct host, not `-pooler`) | yes |
+| DB_USERNAME | Neon role name (Neon → Connection details, usually `neondb_owner`) | yes |
+| DB_PASSWORD | Neon role password | yes (secret) |
+| REDIS_HOST | `red-dats9v1srm7s739tsgd0` (Render Key Value internal hostname, same region) | yes |
+| REDIS_PORT | `6379` | yes |
+| REDIS_PASSWORD | empty for the internal URL | no |
+| REDIS_SSL | `false` (internal) / `true` only with an external `rediss://` host | yes |
+| JWT_SECRET | 32+ random chars, e.g. `openssl rand -base64 48`. Set once, never rotate casually | yes (secret) |
+| JWT_EXPIRATION | `86400000` | yes |
+| CORS_ALLOWED_ORIGINS | `https://seat-reserve-xi.vercel.app,https://seat-reserve-git-main-varunkalambe4294-7255s-projects.vercel.app` (no trailing slash/path) | yes |
+| CORS_ALLOW_VERCEL_PREVIEWS | `true` (adds `https://*.vercel.app`) | yes |
+| WALLET_DEMO_TOP_UP_ENABLED | `true` | yes |
+| WALLET_TOPUP_DAILY_LIMIT | `50000` | no |
+| WALLET_MAX_BALANCE | `100000` | no |
+| APP_TIMEZONE | `Asia/Kolkata` | yes |
+| RATE_LIMIT_PER_MINUTE | `60` | no |
+| JPA_DDL_AUTO | `update` (switch to `none` once the schema exists) | no |
+| DB_POOL_SIZE / DB_MIN_IDLE | `5` / `1` | no |
+| LOG_LEVEL_APP | `INFO` | no |
+| PORT | do NOT set (Render injects `10000`) | – |
 
-## Files in this zip (copy over the same paths)
-Backend: `Dockerfile`, `render.yaml`, `.env.example`, `src/main/resources/application.properties`,
-`…/config/SecurityConfig.java`, `…/config/RedissonConfig.java`
-Frontend/Vercel: `vercel.json`, `frontend/package.json`, `frontend/.env.example`, `frontend/scripts/generate-api-base.mjs`,
-`frontend/src/app/app.component.ts`, `core/{api.service,auth.service,auth.interceptor,workspace.service}.ts`,
-`pages/{shell,auth}.component.{ts,html}`, `core/api.service.spec.ts`, `core/auth.interceptor.spec.ts`
-
-## Render → seatreserve-backend → Environment
-| Key | Value |
-|---|---|
-| SPRING_DATASOURCE_URL | `jdbc:postgresql://ep-billowing-wildflower-b3b09wm3.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require` (use the direct, non-`-pooler` host, as in your log) |
-| DB_USERNAME | Neon role name (Neon dashboard → Connection details) |
-| DB_PASSWORD | Neon role password (secret) |
-| REDIS_HOST | `red-dats9v1srm7s739tsgd0` (Render Key Value *internal* hostname, same region as the web service) |
-| REDIS_PORT | `6379` |
-| REDIS_PASSWORD | empty for Render internal URL (set only if your Redis requires one) |
-| REDIS_SSL | `false` (internal URL). If you use an external `rediss://` URL: host=external host, `REDIS_SSL=true` |
-| JWT_SECRET | ≥ 32 random chars, set once and **never rotate casually** (rotating logs everyone out) |
-| JWT_EXPIRATION | `86400000` |
-| CORS_ALLOWED_ORIGINS | `https://seat-reserve-xi.vercel.app,https://seat-reserve-git-main-varunkalambe4294-7255s-projects.vercel.app` (exact origins, no trailing slash, no path) |
-| CORS_ALLOW_VERCEL_PREVIEWS | `true` (also allows any `https://*.vercel.app`) |
-| WALLET_DEMO_TOP_UP_ENABLED | `true` |
-| APP_TIMEZONE | `Asia/Kolkata` |
-| RATE_LIMIT_PER_MINUTE | `60` |
-| JPA_DDL_AUTO | `update` (set `none` after the schema exists to cut ~20 s from boot) |
-| LOG_LEVEL_APP | `INFO` |
-| PORT | do **not** set – Render injects `10000` |
-| JAVA_TOOL_OPTIONS | optional; default is baked into the Dockerfile |
-
-Render settings: Health Check Path = `/actuator/health/liveness`, Runtime = Docker, Region same as Redis.
+Render settings: Runtime = Docker, Health Check Path = `/actuator/health/liveness`, same region as Redis.
 
 ## Vercel → Project → Settings → Environment Variables (Production + Preview)
 | Key | Value |
 |---|---|
 | VITE_API_BASE_URL | `https://seatreserve-backend.onrender.com` (https, no trailing slash, no `/api`) |
 
-Nothing else. `VITE_WALLET_TOPUP_ENABLED` is a leftover from the React/Vite app and is unused (the backend sends `topUpEnabled`).
-Vercel build settings come from `vercel.json` (Root Directory = repo root, Node 22.x via `engines`). **Redeploy after changing the variable** – it is baked in at build time; the build now fails loudly if it is missing.
+Nothing else. Build settings come from `vercel.json`. The value is baked in at build time: redeploy after changing it. The build fails on Vercel when it is missing.
 
-## After deploying
-1. Push, let Render rebuild; log must show `[BUILD] tag=…` and `Started SrvApplication`.
-2. Open `https://seatreserve-backend.onrender.com/actuator/health/liveness` → `{"status":"UP"}`.
-3. Open the Vercel site: if the backend is asleep you will now see "Waking up the server…" instead of errors; no more `token=no` 401 spam.
-4. Log out/in once (old stored tokens from the previous deployment may be invalid).
-5. Free-plan reality: Render still sleeps after ~15 min idle (cold start now shorter, still tens of seconds). To avoid it, ping
-   `/actuator/health/liveness` every 5–10 min (UptimeRobot/cron-job.org) or use a paid instance.
+## Local docker compose (`.env`)
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `JWT_SECRET`, `JWT_EXPIRATION`, `CORS_ALLOWED_ORIGINS`, `WALLET_DEMO_TOP_UP_ENABLED` (see `.env.example`).
 
-## Not verified here
-Backend was not compiled/run in this environment (no Maven repo access); the Java changes are small (CORS list handling, an extra
-permitAll matcher, Redisson timeouts). Frontend was type-checked, unit-tested (41/41 pass) and production-built.
+## After deploy
+1. Render log shows `[BUILD] tag=…` then `Started SrvApplication`.
+2. `https://seatreserve-backend.onrender.com/actuator/health/liveness` → `{"status":"UP"}`.
+3. Open the Vercel site, log out and in once, check icons and the From/To dropdown.
+4. Free Render sleeps after ~15 min idle: ping `/actuator/health/liveness` every 5–10 min (UptimeRobot) to avoid cold starts.
 
 ====================================================================================================
 FILE: docker-compose.yml
@@ -393,6 +375,7 @@ FILE: frontend\index.html
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b2038">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%232f83ef%27 stroke-width=%271.8%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Crect x=%274%27 y=%273%27 width=%2716%27 height=%2717%27 rx=%273%27/%3E%3Cpath d=%27M4 11h16M7 16h.01M17 16h.01M7 20v2M17 20v2M7 6h10v3H7z%27/%3E%3C/svg%3E">
   <!-- Set content to the deployed backend origin when frontend and backend use different origins. -->
   <meta name="api-base-url" content="">
 </head>
@@ -400,7 +383,6 @@ FILE: frontend\index.html
   <app-root></app-root>
 </body>
 </html>
-
 
 ====================================================================================================
 FILE: frontend\package-lock.json
@@ -9097,22 +9079,18 @@ FILE: frontend\proxy.conf.json
 FILE: frontend\README.md
 ====================================================================================================
 
-# React + Vite
+# SeatReserve frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Angular 21, standalone components.
 
-Currently, two official plugins are available:
+```
+npm install
+npm run dev      # http://localhost:5174, /api proxied to http://localhost:8081
+npm test
+npm run build    # needs VITE_API_BASE_URL on Vercel
+```
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+`scripts/generate-api-base.mjs` writes `src/app/core/api-base.generated.ts` from `VITE_API_BASE_URL` before every build.
 
 ====================================================================================================
 FILE: frontend\src\app\app.component.ts
@@ -10092,6 +10070,26 @@ export class WorkspaceService {
     }
   }
 
+  /** Free-text search from the top bar: matches buses leaving from OR going to the term (the API ANDs from/to). */
+  async searchAnywhere(term: string, date: string): Promise<void> {
+    const query = term.trim();
+    this.searchParams = { from: '', to: '', date, passengers: this.requestedPassengers };
+    this.loadingSearch = true;
+    this.hasSearched = true;
+    this.globalError = '';
+    try {
+      const [leaving, arriving] = await Promise.all([
+        this.api.searchBuses({ from: query, date }),
+        this.api.searchBuses({ to: query, date }),
+      ]);
+      const byId = new Map<number, BusTrip>();
+      [...(leaving || []), ...(arriving || [])].forEach(trip => byId.set(trip.id, trip));
+      this.searchTrips = [...byId.values()].sort((a, b) => a.departureTime.localeCompare(b.departureTime));
+    } finally {
+      this.loadingSearch = false;
+    }
+  }
+
   async selectTrip(trip: BusTrip): Promise<void> {
     this.actionBusy = true;
     this.globalError = '';
@@ -10276,7 +10274,7 @@ FILE: frontend\src\app\pages\auth.component.html
       <form class="form-stack" [formGroup]="form" (ngSubmit)="submit()">
         <label *ngIf="mode === 'register'">Full Name<input formControlName="fullName" placeholder="Your full name" autocomplete="name" [required]="mode === 'register'"></label>
         <label>Email<input type="email" formControlName="email" placeholder="you@example.com" autocomplete="email" required></label>
-        <label>Password<div class="input-with-icon"><input type="password" formControlName="password" [placeholder]="mode === 'login' ? 'Enter your password' : 'Create a strong password'" autocomplete="current-password" minlength="8" required><app-icon name="shield" [size]="17" /></div></label>
+        <label>Password<div class="input-with-icon"><input type="password" formControlName="password" [placeholder]="mode === 'login' ? 'Enter your password' : 'Create a strong password'" [attr.autocomplete]="mode === 'login' ? 'current-password' : 'new-password'" minlength="8" required><app-icon name="shield" [size]="17" /></div></label>
         <button class="blue-button wide" [disabled]="busy" type="submit">{{ busy ? 'Please wait…' : (mode === 'login' ? 'Login' : 'Sign Up') }}</button>
       </form>
       <p class="auth-foot">{{ mode === 'login' ? "Don't have an account?" : 'Already have an account?' }} <button type="button" class="link-button" (click)="toggleMode()">{{ mode === 'login' ? 'Sign up' : 'Log in' }}</button></p>
@@ -10585,7 +10583,7 @@ FILE: frontend\src\app\pages\payment.component.html
         <div class="detail-grid"><div><span>Route</span><strong>{{ data.pendingReservations[0].fromCity }} → {{ data.pendingReservations[0].toCity }}</strong></div><div><span>Travel</span><strong>{{ formatDate(data.pendingReservations[0].departureTime) }} · {{ formatTime(data.pendingReservations[0].departureTime) }}</strong></div><div><span>Seats</span><strong>{{ seatNames }}</strong></div><div><span>Tickets</span><strong>{{ data.pendingReservations.length }}</strong></div></div>
       </div>
       <div class="payment-section border-top"><span class="eyebrow">SELECT PAYMENT METHOD</span><div class="method-grid">
-        <button *ngFor="let item of [{key:'UPI',icon:'wallet',sub:'GPay · PhonePe · Paytm'},{key:'CARD',icon:'card',sub:'Visa · Mastercard'},{key:'NET_BANKING',icon:'bank',sub:'All major banks'},{key:'WALLET',icon:'wallet',sub:'SeatReserve balance'}]" type="button" class="method-card" [class.active]="method === item.key" (click)="method = item.key; walletNote = ''"><span class="method-icon"><app-icon [name]="item.icon" [size]="20" /></span><strong>{{ item.key === 'NET_BANKING' ? 'Net Banking' : item.key[0] + item.key.slice(1).toLowerCase() }}</strong><small>{{ item.key === 'WALLET' ? 'Balance ' + money(data.wallet.balance) : item.sub }}</small></button>
+        <button *ngFor="let item of methods" type="button" class="method-card" [class.active]="method === item.key" (click)="method = item.key; walletNote = ''"><span class="method-icon"><app-icon [name]="item.icon" [size]="20" /></span><strong>{{ item.label }}</strong><small>{{ item.key === 'WALLET' ? 'Balance ' + money(data.wallet.balance) : item.sub }}</small></button>
       </div>
       <div *ngIf="method === 'UPI'" class="payment-input"><label>UPI ID<input placeholder="yourname@upi" autocomplete="off"></label></div>
       <div *ngIf="method === 'CARD'" class="payment-input card-input-grid"><label>Card number<input placeholder="1234 5678 9012 3456" inputmode="numeric" autocomplete="cc-number"></label><label>Expiry<input placeholder="MM/YY" autocomplete="cc-exp"></label><label>CVV<input placeholder="•••" type="password" autocomplete="cc-csc"></label></div>
@@ -10598,7 +10596,6 @@ FILE: frontend\src\app\pages\payment.component.html
     <aside class="panel-card fare-card"><h3>Fare summary</h3><div class="fare-row"><span>{{ data.pendingReservations.length }} × ticket fare</span><strong>{{ money(fare) }}</strong></div><div class="fare-row"><span>Convenience fee</span><strong>{{ money(fee) }}</strong></div><div class="fare-row total"><span>Total amount</span><strong>{{ money(total) }}</strong></div><button class="blue-button wide" type="button" [disabled]="cannotPay" (click)="pay()">{{ expired ? 'Payment expired' : walletShort ? 'Insufficient wallet balance' : data.actionBusy ? 'Processing…' : 'Pay ' + money(total) }}</button><p class="secure-copy"><app-icon name="shield" [size]="14" />{{ method === 'WALLET' ? 'Wallet deduction is processed atomically.' : 'Demo payment flow for this build.' }}</p><button class="text-button centered" type="button" (click)="goBack()">{{ data.paymentOrigin === 'seats' ? 'Release seats & go back' : 'Back to my bookings' }}</button></aside>
   </div>
 </div>
-
 
 ====================================================================================================
 FILE: frontend\src\app\pages\payment.component.ts
@@ -10634,7 +10631,13 @@ export class PaymentComponent implements OnInit {
   }
 
   get fare(): number { return this.data.pendingReservations.reduce((sum, item) => sum + Number(item.fare || 0), 0); }
-  get fee(): number { return this.data.pendingReservations.reduce((sum, item) => sum + Math.round(Number(item.fare || 0) * 0.035), 0); }
+  get fee(): number { return this.data.pendingReservations.reduce((sum, item) => sum + Math.round((Number(item.fare || 0) * 35) / 1000), 0); }
+  readonly methods = [
+    { key: 'UPI', label: 'UPI', icon: 'wallet', sub: 'GPay · PhonePe · Paytm' },
+    { key: 'CARD', label: 'Card', icon: 'card', sub: 'Visa · Mastercard' },
+    { key: 'NET_BANKING', label: 'Net Banking', icon: 'bank', sub: 'All major banks' },
+    { key: 'WALLET', label: 'Wallet', icon: 'wallet', sub: 'SeatReserve balance' },
+  ];
   get total(): number { return this.fare + this.fee; }
   get walletShort(): boolean { return this.method === 'WALLET' && Number(this.data.wallet.balance || 0) < this.total; }
   get cannotPay(): boolean { return this.data.actionBusy || this.expired || this.walletShort; }
@@ -10820,9 +10823,9 @@ FILE: frontend\src\app\pages\seats.component.html
   <div class="page-header compact"><div><span class="eyebrow">SELECT SEATS</span><h1>{{ trip.operatorName }}</h1><p>{{ trip.busType }} · {{ formatDate(trip.departureTime) }} · {{ formatTime(trip.departureTime) }}</p></div><div class="journey-chip"><strong>{{ trip.fromCity }}</strong><app-icon name="arrow" [size]="14" /><strong>{{ trip.toCity }}</strong></div></div>
   <div class="seat-layout">
     <section class="panel-card seat-panel-large">
-      <div class="panel-title-row"><div><h3>Choose your seats</h3><p>{{ availableCount }} available · select up to {{ data.requestedPassengers }} passenger seat{{ data.requestedPassengers === 1 ? '' : 's' }}</p><label class="passenger-picker"><span>Passengers</span><select [value]="data.requestedPassengers" (change)="data.setPassengerCount(+$any($event.target).value)"><option *ngFor="let count of [1,2,3,4,5,6]" [value]="count">{{ count }}</option></select></label></div><div class="seat-legend"><span><i class="legend-dot available"></i> Available</span><span><i class="legend-dot selected"></i> Selected</span><span><i class="legend-dot booked"></i> Booked</span></div></div>
+      <div class="panel-title-row"><div><h3>Choose your seats</h3><p>{{ availableCount }} available · select up to {{ data.requestedPassengers }} passenger seat{{ data.requestedPassengers === 1 ? '' : 's' }}</p><label class="passenger-picker"><span>Passengers</span><select (change)="data.setPassengerCount(+$any($event.target).value)"><option *ngFor="let count of [1,2,3,4,5,6]" [value]="count" [selected]="count === data.requestedPassengers">{{ count }}</option></select></label></div><div class="seat-legend"><span><i class="legend-dot available"></i> Available</span><span><i class="legend-dot selected"></i> Selected</span><span><i class="legend-dot held"></i> Held</span><span><i class="legend-dot booked"></i> Booked</span></div></div>
       <div class="bus-stage">FRONT / DRIVER</div>
-      <div class="seat-bus-shell"><div class="driver-cabin"><app-icon name="bus" [size]="26" /><span>Driver</span></div><div class="seat-grid-bus"><button *ngFor="let seat of data.seats" type="button" class="seat-chip" [class.available]="seat.status === 'AVAILABLE'" [class.booked]="seat.status !== 'AVAILABLE'" [class.selected]="isSelected(seat)" [disabled]="seat.status !== 'AVAILABLE' || (!isSelected(seat) && data.selectedSeats.length >= data.requestedPassengers)" (click)="toggleSeat(seat)"><strong>{{ seat.seatNumber }}</strong><small>{{ seat.status === 'AVAILABLE' ? money(trip.price) : seat.status }}</small></button></div><div class="bus-exit">EXIT</div></div>
+      <div class="seat-bus-shell"><div class="driver-cabin"><app-icon name="bus" [size]="26" /><span>Driver</span></div><div class="seat-grid-bus"><button *ngFor="let seat of data.seats" type="button" class="seat-chip" [class.available]="seat.status === 'AVAILABLE'" [class.held]="seat.status === 'HELD'" [class.booked]="seat.status !== 'AVAILABLE' && seat.status !== 'HELD'" [class.selected]="isSelected(seat)" [disabled]="seat.status !== 'AVAILABLE' || (!isSelected(seat) && data.selectedSeats.length >= data.requestedPassengers)" (click)="toggleSeat(seat)"><strong>{{ seat.seatNumber }}</strong><small>{{ seat.status === 'AVAILABLE' ? money(trip.price) : seat.status }}</small></button></div><div class="bus-exit">EXIT</div></div>
     </section>
     <aside class="panel-card booking-summary">
       <div class="panel-title-row"><div><h3>Booking summary</h3><p>{{ data.selectedSeats.length ? data.selectedSeats.length + ' seat(s) selected' : 'Select one or more seats.' }}</p></div><button *ngIf="data.selectedSeats.length" class="text-button" type="button" (click)="data.selectedSeats = []">Clear</button></div>
@@ -10834,7 +10837,6 @@ FILE: frontend\src\app\pages\seats.component.html
     </aside>
   </div>
 </div>
-
 
 ====================================================================================================
 FILE: frontend\src\app\pages\seats.component.ts
@@ -10964,7 +10966,7 @@ import { interval } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
-import { WorkspaceService, formatDate, formatTime, money } from '../core/workspace.service';
+import { WorkspaceService, formatDate, formatTime, money, todayInput } from '../core/workspace.service';
 import { IconComponent } from '../shared/icon.component';
 
 @Component({
@@ -10994,7 +10996,7 @@ export class ShellComponent implements OnInit {
     void this.load();
     interval(7000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       // Skip while signed out, while the backend is waking, or while the previous poll is still running.
-      if (!this.auth.isAuthenticated || this.api.warmingUp || this.polling) return;
+      if (!this.auth.isAuthenticated || this.api.warmingUp || this.polling || document.hidden) return;
       this.polling = true;
       this.data.pollRefresh().catch(error => this.handleError(error)).finally(() => { this.polling = false; });
     });
@@ -11027,9 +11029,11 @@ export class ShellComponent implements OnInit {
   async searchFromTopbar(): Promise<void> {
     const query = this.topSearch.trim();
     if (!query) { await this.router.navigate(['/search']); return; }
-    this.data.searchParams = { ...this.data.searchParams, from: query };
+    const parts = query.split(/\s*(?:\s+to\s+|->|→)\s*/i).map(part => part.trim()).filter(Boolean);
+    const date = this.data.searchParams.date >= todayInput(0) ? this.data.searchParams.date : todayInput(1);
     try {
-      await this.data.search(this.data.searchParams);
+      if (parts.length === 2) await this.data.search({ ...this.data.searchParams, from: parts[0], to: parts[1], date });
+      else await this.data.searchAnywhere(query, date);
       await this.router.navigate(['/search']);
       this.topSearch = '';
     } catch (error) { this.handleError(error); }
@@ -11191,22 +11195,69 @@ export class WalletComponent {
 }
 
 ====================================================================================================
+FILE: frontend\src\app\shared\icon.component.spec.ts
+====================================================================================================
+
+import { Component } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { IconComponent } from './icon.component';
+
+@Component({
+  standalone: true,
+  imports: [IconComponent],
+  template: '<app-icon name="bus" /><app-icon name="search" /><app-icon name="does-not-exist" />',
+})
+class HostComponent {}
+
+describe('IconComponent', () => {
+  it('renders the SVG child shapes (Angular HTML sanitising used to strip them)', () => {
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    const svgs = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('svg'));
+    expect(svgs.length).toBe(3);
+    expect(svgs[0].querySelectorAll('rect, path').length).toBeGreaterThan(0);
+    expect(svgs[1].querySelector('circle')).not.toBeNull();
+    expect(svgs[1].querySelector('path')).not.toBeNull();
+  });
+
+  it('falls back to the "more" icon for an unknown name', () => {
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    const svgs = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('svg'));
+    expect(svgs[2].querySelectorAll('circle').length).toBe(3);
+  });
+});
+
+====================================================================================================
 FILE: frontend\src\app\shared\icon.component.ts
 ====================================================================================================
 
 import { Component, Input } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 @Component({
   selector: 'app-icon',
   standalone: true,
-  template: '<svg [attr.width]="size" [attr.height]="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" [attr.stroke-width]="strokeWidth" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" [innerHTML]="pathMarkup"></svg>',
+  host: { style: 'display:inline-flex;flex:none;align-items:center;justify-content:center;line-height:0' },
+  template: '<svg [attr.width]="size" [attr.height]="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" [attr.stroke-width]="strokeWidth" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="flex:none" [innerHTML]="markup"></svg>',
 })
 export class IconComponent {
-  @Input() name = 'more';
+  @Input() set name(value: string) {
+    this.current = value;
+    this.markup = this.resolve(value);
+  }
+  get name(): string { return this.current; }
   @Input() size = 20;
   @Input() strokeWidth = 1.8;
 
-  private readonly paths: Record<string, string> = {
+  markup: SafeHtml;
+  private current = 'more';
+
+  constructor(private readonly sanitizer: DomSanitizer) {
+    this.markup = this.resolve(this.current);
+  }
+
+  private static readonly paths: Record<string, string> = {
     home: '<path d="m3 10 9-7 9 7"/><path d="M5 9v10h14V9"/><path d="M9 19v-6h6v6"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 5 5"/>',
     calendar: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M7 2.5v4M17 2.5v4M3 9h18"/><path d="M7 13h3M14 13h3M7 17h3"/>',
@@ -11236,7 +11287,18 @@ export class IconComponent {
     bank: '<path d="m3 9 9-6 9 6M4 10h16M5 10v8M9 10v8M15 10v8M19 10v8M3 20h18"/>',
   };
 
-  get pathMarkup(): string { return this.paths[this.name] ?? this.paths['more']; }
+  private static readonly cache = new Map<string, SafeHtml>();
+
+  /** The markup is a static, hard-coded allow-list (never user input). Angular's HTML sanitizer strips every SVG child element, so it is marked trusted once per icon and cached. */
+  private resolve(name: string): SafeHtml {
+    const key = Object.prototype.hasOwnProperty.call(IconComponent.paths, name) ? name : 'more';
+    let safe = IconComponent.cache.get(key);
+    if (!safe) {
+      safe = this.sanitizer.bypassSecurityTrustHtml(IconComponent.paths[key]);
+      IconComponent.cache.set(key, safe);
+    }
+    return safe;
+  }
 }
 
 ====================================================================================================
@@ -11245,33 +11307,57 @@ FILE: frontend\src\app\shared\search-form.component.html
 
 <div class="search-box sb">
   <div class="search-toggle"><button class="trip-toggle active" type="button">One Way</button></div>
-  <form [formGroup]="form" (ngSubmit)="submit()">
+  <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
     <div class="sb-grid">
       <div class="sb-field">
         <label class="sb-label" for="from-city">From</label>
-        <div class="sb-control">
-          <app-icon name="map" [size]="16" />
-          <input id="from-city" formControlName="from" list="seatreserve-cities" autocomplete="off" placeholder="Leaving from">
+        <div class="sb-control" [class.is-open]="openField === 'from'">
+          <app-icon class="sb-lead" name="map" [size]="17" />
+          <input #fromInput id="from-city" formControlName="from" autocomplete="off" placeholder="Leaving from"
+                 role="combobox" aria-autocomplete="list" aria-controls="sb-menu-from" [attr.aria-expanded]="openField === 'from'"
+                 (focus)="openMenu('from')" (input)="onType('from')" (keydown)="onKey('from', $event)" (blur)="closeMenu('from')">
+          <button *ngIf="form.controls.from.value" type="button" class="sb-clear" aria-label="Clear departure city"
+                  (mousedown)="$event.preventDefault()" (click)="clearField('from')"><app-icon name="close" [size]="12" [strokeWidth]="2.4" /></button>
+        </div>
+        <div *ngIf="openField === 'from'" class="sb-menu" id="sb-menu-from" role="listbox" (mousedown)="$event.preventDefault()">
+          <button *ngFor="let city of options('from'); let i = index" type="button" role="option" class="sb-option"
+                  [class.is-selected]="isSelected('from', city) || i === activeIndex" [attr.aria-selected]="isSelected('from', city)" (click)="pick('from', city)">
+            <app-icon class="sb-option-icon" name="map" [size]="15" /><span>{{ city }}</span><app-icon *ngIf="isSelected('from', city)" class="sb-option-check" name="check" [size]="15" />
+          </button>
+          <div *ngIf="!options('from').length" class="sb-empty">No listed city matches “{{ form.controls.from.value }}”. Press search to try it anyway.</div>
         </div>
       </div>
-      <button class="sb-swap" type="button" aria-label="Swap From and To" title="Swap cities" (click)="swapCities()"><app-icon name="swap" [size]="16" /></button>
+
+      <button class="sb-swap" type="button" aria-label="Swap From and To" title="Swap cities" (click)="swapCities()"><app-icon name="swap" [size]="17" /></button>
+
       <div class="sb-field">
         <label class="sb-label" for="to-city">To</label>
-        <div class="sb-control">
-          <app-icon name="map" [size]="16" />
-          <input id="to-city" formControlName="to" list="seatreserve-cities" autocomplete="off" placeholder="Going to">
+        <div class="sb-control" [class.is-open]="openField === 'to'">
+          <app-icon class="sb-lead" name="map" [size]="17" />
+          <input #toInput id="to-city" formControlName="to" autocomplete="off" placeholder="Going to"
+                 role="combobox" aria-autocomplete="list" aria-controls="sb-menu-to" [attr.aria-expanded]="openField === 'to'"
+                 (focus)="openMenu('to')" (input)="onType('to')" (keydown)="onKey('to', $event)" (blur)="closeMenu('to')">
+          <button *ngIf="form.controls.to.value" type="button" class="sb-clear" aria-label="Clear destination city"
+                  (mousedown)="$event.preventDefault()" (click)="clearField('to')"><app-icon name="close" [size]="12" [strokeWidth]="2.4" /></button>
+        </div>
+        <div *ngIf="openField === 'to'" class="sb-menu" id="sb-menu-to" role="listbox" (mousedown)="$event.preventDefault()">
+          <button *ngFor="let city of options('to'); let i = index" type="button" role="option" class="sb-option"
+                  [class.is-selected]="isSelected('to', city) || i === activeIndex" [attr.aria-selected]="isSelected('to', city)" (click)="pick('to', city)">
+            <app-icon class="sb-option-icon" name="map" [size]="15" /><span>{{ city }}</span><app-icon *ngIf="isSelected('to', city)" class="sb-option-check" name="check" [size]="15" />
+          </button>
+          <div *ngIf="!options('to').length" class="sb-empty">No listed city matches “{{ form.controls.to.value }}”. Press search to try it anyway.</div>
         </div>
       </div>
-      <datalist id="seatreserve-cities"><option *ngFor="let city of cities" [value]="city"></option></datalist>
+
       <div class="sb-rest">
         <div class="sb-field">
           <label class="sb-label" for="sb-date">Date</label>
-          <div class="sb-control"><app-icon name="calendar" [size]="16" /><input id="sb-date" type="date" formControlName="date" [min]="today"></div>
+          <div class="sb-control"><app-icon class="sb-lead" name="calendar" [size]="17" /><input id="sb-date" type="date" formControlName="date" [min]="today"></div>
         </div>
         <div class="sb-field">
           <span class="sb-label">Passengers</span>
           <div class="sb-control sb-stepper">
-            <app-icon name="user" [size]="16" />
+            <app-icon class="sb-lead" name="user" [size]="17" />
             <div class="sb-stepper-controls">
               <button type="button" aria-label="Fewer passengers" [disabled]="passengers <= 1" (click)="changePassengers(-1)">−</button>
               <strong aria-live="polite">{{ passengers }}</strong>
@@ -11279,7 +11365,7 @@ FILE: frontend\src\app\shared\search-form.component.html
             </div>
           </div>
         </div>
-        <button class="blue-button sb-submit" type="submit"><app-icon name="search" [size]="16" /> Search Buses</button>
+        <button class="blue-button sb-submit" type="submit"><app-icon name="search" [size]="17" /> Search Buses</button>
       </div>
     </div>
     <div class="sb-quick">
@@ -11291,32 +11377,125 @@ FILE: frontend\src\app\shared\search-form.component.html
   </form>
 </div>
 
+====================================================================================================
+FILE: frontend\src\app\shared\search-form.component.spec.ts
+====================================================================================================
+
+import { Component } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { SearchParams } from '../core/models';
+import { SearchFormComponent } from './search-form.component';
+
+@Component({
+  standalone: true,
+  imports: [SearchFormComponent],
+  template: '<app-search-form [initial]="params" (search)="last = $event" (passengerChange)="setPassengers($event)" />',
+})
+class HostComponent {
+  params: SearchParams = { from: 'Pune', to: 'Mumbai', date: '2099-01-02', passengers: 1 };
+  last: SearchParams | null = null;
+  setPassengers(count: number): void { this.params = { ...this.params, passengers: count }; }
+}
+
+describe('SearchFormComponent', () => {
+  const setup = () => {
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    return { fixture, root, input: (id: string) => root.querySelector<HTMLInputElement>(id)! };
+  };
+
+  it('renders both city inputs with their icons', () => {
+    const { root, input } = setup();
+    expect(input('#from-city').value).toBe('Pune');
+    expect(input('#to-city').value).toBe('Mumbai');
+    expect(root.querySelectorAll('.sb-control svg path, .sb-control svg circle, .sb-control svg rect').length).toBeGreaterThan(3);
+  });
+
+  it('opens a dropdown with every other city on focus and picks one', () => {
+    const { fixture, root, input } = setup();
+    input('#from-city').dispatchEvent(new Event('focus'));
+    fixture.detectChanges();
+    const labels = Array.from(root.querySelectorAll('#sb-menu-from .sb-option span')).map(el => el.textContent?.trim());
+    expect(labels).toContain('Pune');
+    expect(labels).toContain('Goa');
+    expect(labels).not.toContain('Mumbai');
+    const goa = Array.from(root.querySelectorAll<HTMLButtonElement>('#sb-menu-from .sb-option')).find(el => el.textContent?.includes('Goa'))!;
+    goa.click();
+    fixture.detectChanges();
+    expect(input('#from-city').value).toBe('Goa');
+    expect(root.querySelector('#sb-menu-from')).toBeNull();
+  });
+
+  it('filters the dropdown while typing', () => {
+    const { fixture, root, input } = setup();
+    const field = input('#to-city');
+    field.value = 'ban';
+    field.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    const labels = Array.from(root.querySelectorAll('#sb-menu-to .sb-option span')).map(el => el.textContent?.trim());
+    expect(labels).toEqual(['Bangalore']);
+  });
+
+  it('keeps typed cities when only the passenger count changes', () => {
+    const { fixture, root, input } = setup();
+    const from = input('#from-city');
+    from.value = 'Delhi';
+    from.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    root.querySelector<HTMLButtonElement>('button[aria-label="More passengers"]')!.click();
+    fixture.detectChanges();
+    expect(input('#from-city').value).toBe('Delhi');
+    expect(root.querySelector('.sb-stepper strong')?.textContent?.trim()).toBe('2');
+  });
+
+  it('validates and emits a search', () => {
+    const { fixture, root, input } = setup();
+    input('#to-city').value = 'pune';
+    input('#to-city').dispatchEvent(new Event('input'));
+    root.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit'));
+    fixture.detectChanges();
+    expect(root.querySelector('.sb-error')?.textContent).toContain('cannot be the same');
+    input('#to-city').value = 'Goa';
+    input('#to-city').dispatchEvent(new Event('input'));
+    root.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit'));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.last).toEqual({ from: 'Pune', to: 'Goa', date: '2099-01-02', passengers: 1 });
+  });
+});
 
 ====================================================================================================
 FILE: frontend\src\app\shared\search-form.component.ts
 ====================================================================================================
 
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnChanges, Output, SimpleChanges, ViewChild } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { SearchParams } from '../core/models';
 import { todayInput } from '../core/workspace.service';
 import { IconComponent } from './icon.component';
+
+type CityField = 'from' | 'to';
 
 @Component({
   selector: 'app-search-form',
   standalone: true,
   imports: [CommonModule, ReactiveFormsModule, IconComponent],
   templateUrl: './search-form.component.html',
+  host: { style: 'display:block;position:relative;z-index:5' },
 })
 export class SearchFormComponent implements OnChanges {
   @Input() initial: SearchParams = { from: 'Pune', to: 'Mumbai', date: todayInput(1), passengers: 1 };
   @Output() search = new EventEmitter<SearchParams>();
   @Output() passengerChange = new EventEmitter<number>();
+  @ViewChild('fromInput') private fromInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('toInput') private toInput?: ElementRef<HTMLInputElement>;
 
   readonly today = todayInput(0);
   readonly tomorrow = todayInput(1);
   error = '';
+  openField: CityField | null = null;
+  activeIndex = -1;
   readonly cities = ['Pune', 'Mumbai', 'Nashik', 'Goa', 'Bangalore', 'Delhi', 'Jaipur', 'Hyderabad', 'Ahmedabad', 'Surat', 'Chennai', 'Pondicherry'];
   readonly form = this.fb.nonNullable.group({
     from: ['Pune', Validators.required],
@@ -11325,27 +11504,114 @@ export class SearchFormComponent implements OnChanges {
     passengers: [1, [Validators.required, Validators.min(1), Validators.max(6)]],
   });
 
+  private lastInitial: SearchParams | null = null;
+
   constructor(private readonly fb: FormBuilder) {}
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['initial'] && this.initial) this.form.patchValue({ ...this.initial }, { emitEvent: false });
+    if (!changes['initial'] || !this.initial) return;
+    const next = this.initial;
+    const prev = this.lastInitial;
+    // Only overwrite what the parent really changed. Re-patching everything on every change wiped the cities the
+    // visitor had typed (but not yet searched) whenever the passenger stepper updated the shared search params.
+    const patch: Partial<SearchParams> = {};
+    if (!prev || prev.from !== next.from) patch.from = next.from;
+    if (!prev || prev.to !== next.to) patch.to = next.to;
+    if (!prev || prev.date !== next.date) patch.date = next.date;
+    if (!prev || prev.passengers !== next.passengers) patch.passengers = next.passengers;
+    this.lastInitial = { ...next };
+    if (Object.keys(patch).length) this.form.patchValue(patch, { emitEvent: false });
   }
 
   get passengers(): number { return Number(this.form.controls.passengers.value || 1); }
+
   changePassengers(delta: number): void {
     const next = Math.min(6, Math.max(1, this.passengers + delta));
     this.form.controls.passengers.setValue(next);
     this.passengerChange.emit(next);
   }
 
+  options(field: CityField): string[] {
+    const query = this.form.controls[field].value.trim().toLowerCase();
+    const other = this.form.controls[field === 'from' ? 'to' : 'from'].value.trim().toLowerCase();
+    const exact = this.cities.some(city => city.toLowerCase() === query);
+    return this.cities.filter(city => {
+      const lower = city.toLowerCase();
+      return lower !== other && (!query || exact || lower.includes(query));
+    });
+  }
+
+  isSelected(field: CityField, city: string): boolean {
+    return this.form.controls[field].value.trim().toLowerCase() === city.toLowerCase();
+  }
+
+  openMenu(field: CityField): void {
+    this.openField = field;
+    this.activeIndex = -1;
+  }
+
+  closeMenu(field: CityField): void {
+    if (this.openField === field) { this.openField = null; this.activeIndex = -1; }
+  }
+
+  onType(field: CityField): void {
+    this.openField = field;
+    this.activeIndex = -1;
+    this.error = '';
+  }
+
+  onKey(field: CityField, event: KeyboardEvent): void {
+    const options = this.options(field);
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        if (this.openField !== field) { this.openMenu(field); }
+        if (options.length) this.activeIndex = (this.activeIndex + 1) % options.length;
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        if (this.openField !== field) { this.openMenu(field); }
+        if (options.length) this.activeIndex = (this.activeIndex - 1 + options.length) % options.length;
+        break;
+      case 'Enter':
+        if (this.openField === field && this.activeIndex >= 0 && options[this.activeIndex]) {
+          event.preventDefault();
+          this.pick(field, options[this.activeIndex]);
+        }
+        break;
+      case 'Escape':
+        this.closeMenu(field);
+        break;
+      default:
+        break;
+    }
+  }
+
+  pick(field: CityField, city: string): void {
+    this.form.controls[field].setValue(city);
+    this.error = '';
+    this.openField = null;
+    this.activeIndex = -1;
+    if (field === 'from' && !this.form.controls.to.value.trim()) this.toInput?.nativeElement.focus();
+  }
+
+  clearField(field: CityField): void {
+    this.form.controls[field].setValue('');
+    this.error = '';
+    this.openMenu(field);
+    (field === 'from' ? this.fromInput : this.toInput)?.nativeElement.focus();
+  }
+
   swapCities(): void {
     const from = this.form.controls.from.value;
     this.form.patchValue({ from: this.form.controls.to.value, to: from });
     this.error = '';
+    this.openField = null;
   }
 
   submit(): void {
     this.error = '';
+    this.openField = null;
     const value = this.form.getRawValue();
     const from = value.from.trim();
     const to = value.to.trim();
@@ -11357,7 +11623,12 @@ export class SearchFormComponent implements OnChanges {
   }
 
   setDate(date: string): void { this.form.controls.date.setValue(date); this.error = ''; }
-  clearCities(): void { this.form.patchValue({ from: '', to: '' }); this.error = ''; }
+
+  clearCities(): void {
+    this.form.patchValue({ from: '', to: '' });
+    this.error = '';
+    this.openField = null;
+  }
 }
 
 ====================================================================================================
@@ -11504,9 +11775,10 @@ input, select, textarea { outline: none; }
 .hero-mountain.m1 { right: 290px; }
 .hero-mountain.m2 { right: 60px; width: 330px; height: 180px; background: rgba(77, 148, 197, .2); }
 .hero-road { position: absolute; left: 18%; right: 0; bottom: -60px; height: 140px; border-radius: 50% 50% 0 0; border-top: 1px solid rgba(200,235,255,.25); background: radial-gradient(ellipse at center, rgba(255,255,255,.07), transparent 65%); }
-.hero-graphic > svg { position: relative; transform: translateY(28px); filter: drop-shadow(0 16px 20px rgba(0,0,0,.25)); opacity: .95; }
+.hero-graphic > app-icon { position: relative; transform: translateY(28px); filter: drop-shadow(0 16px 20px rgba(0,0,0,.25)); opacity: .95; }
 
-.search-box { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: 0 14px 34px rgba(15, 45, 79, .07); position: relative; z-index: 4; margin-top: -38px; }
+.search-box { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: 0 14px 34px rgba(15, 45, 79, .07); position: relative; z-index: 4; }
+.hero-banner + app-search-form .search-box { margin-top: -38px; }
 .search-toggle { display: flex; gap: 7px; margin-bottom: 14px; }
 .trip-toggle { border: 0; color: #73839a; padding: 7px 11px; border-radius: 18px; font-size: 11px; font-weight: 800; background: transparent; }
 .trip-toggle.active { color: #0c5dc0; background: #edf6ff; }
@@ -11586,6 +11858,7 @@ input, select, textarea { outline: none; }
 .legend-dot.available { background: #78d9b0; }
 .legend-dot.selected { background: #2b7fea; }
 .legend-dot.booked { background: #e66a74; }
+.legend-dot.held { background: #efc46a; }
 .bus-stage { width: min(580px, 82%); margin: 23px auto 14px; border-radius: 999px; background: #eef6ff; color: #5f81a4; padding: 8px 11px; text-align: center; font-size: 9px; letter-spacing: .28em; font-weight: 850; }
 .seat-bus-shell { width: min(560px, 88%); margin: 0 auto; border: 1px solid #cbd9e9; border-radius: 40px; background: #f8fbff; padding: 20px 18px 22px; position: relative; }
 .driver-cabin { height: 50px; background: linear-gradient(180deg, #dbeaf8, #edf5fc); border: 1px solid #cad9e9; border-radius: 24px 24px 13px 13px; display: flex; justify-content: center; align-items: center; gap: 7px; color: #587694; font-size: 10px; margin-bottom: 15px; }
@@ -11795,7 +12068,7 @@ input, select, textarea { outline: none; }
 .check-row input { width: 12px; height: 12px; }
 .input-with-icon { position: relative; }
 .input-with-icon input { padding-right: 37px; }
-.input-with-icon svg { position: absolute; right: 12px; top: 12px; color: #a0adbb; }
+.input-with-icon app-icon { position: absolute; right: 12px; top: 12px; color: #a0adbb; pointer-events: none; }
 .wide { width: 100%; }
 .auth-foot { text-align: center; margin: 16px 0 0; color: #8c99a8; font-size: 9px; }
 .link-button { border: 0; background: transparent; color: #126fd8; font-weight: 800; }
@@ -11830,13 +12103,13 @@ input, select, textarea { outline: none; }
   .mobile-brand { display: block; }
   .global-search { flex: 1; width: auto; }
   .global-search kbd { display: none; }
-  .profile-name, .profile-chip > svg { display: none; }
+  .profile-name, .profile-chip > app-icon { display: none; }
   .app-content { padding: 18px 14px 28px; }
   .hero-banner { min-height: 330px; padding: 28px 22px; }
   .hero-banner-copy { max-width: 75%; }
   .hero-banner h1 { font-size: 38px; }
   .hero-graphic { width: 70%; opacity: .65; right: -20%; }
-  .search-box { margin-top: -25px; }
+  .hero-banner + app-search-form .search-box { margin-top: -25px; }
   .search-fields { grid-template-columns: 1fr; }
   .swap-button { display: none; }
   .route-grid { grid-template-columns: 1fr 1fr; }
@@ -11862,9 +12135,9 @@ input, select, textarea { outline: none; }
   .card-input-grid { grid-template-columns: 1fr; }
   .notification-panel { right: 12px; top: 70px; }
   .mobile-bottom-nav { display: grid; grid-template-columns: repeat(5,1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: 64px; background: rgba(255,255,255,.97); border-top: 1px solid var(--line); backdrop-filter: blur(18px); }
-  .mobile-bottom-nav button { border: 0; background: transparent; color: #8190a3; display: grid; place-items: center; align-content: center; gap: 3px; font-size: 8px; font-weight: 800; }
-  .mobile-bottom-nav button.active { color: #0e6cd6; }
-  .mobile-bottom-nav button.active svg { filter: drop-shadow(0 4px 7px rgba(21,116,232,.2)); }
+  .mobile-bottom-nav a, .mobile-bottom-nav button { border: 0; background: transparent; color: #8190a3; display: grid; place-items: center; align-content: center; gap: 3px; font-size: 11px; font-weight: 800; text-decoration: none; }
+  .mobile-bottom-nav a.active, .mobile-bottom-nav button.active { color: #0e6cd6; }
+  .mobile-bottom-nav a.active app-icon, .mobile-bottom-nav button.active app-icon { filter: drop-shadow(0 4px 7px rgba(21,116,232,.2)); }
   .auth-screen { grid-template-columns: 1fr; min-height: 100vh; }
   .auth-showcase { min-height: 40vh; padding: 22px 24px; }
   .auth-showcase-copy { margin-top: 25px; }
@@ -11948,8 +12221,10 @@ input, select, textarea { outline: none; }
 
 .sb-menu { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0; max-height: 264px; overflow-y: auto; padding: 6px; background: #fff; border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 18px 40px rgba(15, 45, 79, .16); }
 .sb-option { width: 100%; display: flex; align-items: center; gap: 9px; padding: 10px 11px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font: inherit; font-size: 14px; font-weight: 650; text-align: left; cursor: pointer; }
-.sb-option svg:first-child { color: #93a5bb; }
-.sb-option svg:last-child:not(:first-child) { margin-left: auto; color: #0c5dc0; }
+.sb-lead { color: #8a9ab0; }
+.sb-control:focus-within .sb-lead, .sb-control.is-open .sb-lead { color: #1574e8; }
+.sb-option-icon { color: #93a5bb; }
+.sb-option-check { margin-left: auto; color: #0c5dc0; }
 .sb-option:hover { background: #edf6ff; }
 .sb-option.is-selected { background: #f3f8ff; color: #0c5dc0; font-weight: 800; }
 .sb-empty { padding: 12px; color: #6b7c92; font-size: 13px; line-height: 1.45; }
@@ -11988,7 +12263,7 @@ input, select, textarea { outline: none; }
    My Bookings: result banner + cancel dialog
    ========================================================================== */
 .booking-notice { display: flex; align-items: flex-start; gap: 12px; margin: 0 0 16px; padding: 13px 14px; border-radius: 12px; border: 1px solid; }
-.booking-notice > svg { flex: none; margin-top: 2px; }
+.booking-notice > app-icon { flex: none; margin-top: 2px; }
 .booking-notice.success { background: #effaf5; border-color: #bfe8d5; color: #12684a; }
 .booking-notice.error { background: #fff6f7; border-color: #f5c9ce; color: #a63e49; }
 .booking-notice-copy { flex: 1; display: grid; gap: 3px; min-width: 0; }
@@ -12023,6 +12298,7 @@ input, select, textarea { outline: none; }
 
 /* Angular root replaces the former React #root mount element. */
 app-root { display: block; min-height: 100%; }
+app-search-form { display: block; }
 
 
 /* Global base styles carried over from the former React entry stylesheet. */
@@ -12052,6 +12328,14 @@ button, input, select, textarea { font: inherit; }
   .bus-price, .bus-features { grid-column: 1; }
   .bus-price { justify-content: space-between; }
 }
+
+/* Keyboard focus rings (inputs hide the native outline globally). */
+.nav-item:focus-visible, .icon-button:focus-visible, .blue-button:focus-visible, .outline-button:focus-visible,
+.danger-button:focus-visible, .route-card:focus-visible, .sb-option:focus-visible, .sb-chip:focus-visible,
+.sb-swap:focus-visible, .sb-stepper button:focus-visible, .seat-chip:focus-visible, .mobile-bottom-nav a:focus-visible {
+  outline: 2px solid #4a90e2; outline-offset: 2px;
+}
+.sb-option.is-selected { scroll-margin: 6px; }
 
 ====================================================================================================
 FILE: frontend\tsconfig.app.json
@@ -12596,85 +12880,24 @@ FILE: pom.xml
 FILE: README_UPGRADE.md
 ====================================================================================================
 
-# SeatReserve UI + End-to-End Upgrade
+# SeatReserve
 
-This package is a rebuilt version of the uploaded SeatReserve codebase with the frontend redesigned around the supplied SeatReserve bus-booking UI and the backend extended to support the same application flow end to end.
+Angular 21 frontend (`frontend/`, hosted on Vercel) + Spring Boot 4 backend (repo root, hosted on Render in Docker) with PostgreSQL (Neon) and Redis.
 
-## Frontend
-
-Implemented screens and flows:
-
-- Login and sign-up
-- Dashboard/home with route search and popular routes
-- Search results with bus operator, departure, arrival, duration, rating, amenities and fare
-- Trip-specific seat map with available, held and booked states
-- 10-minute seat hold and live countdown
-- Payment screen with UPI, card, net banking and wallet methods
-- My Bookings with upcoming, past and cancelled states
-- Digital ticket view with booking reference and QR-style ticket code
-- Wallet balance, top-up and transaction history
-- Profile editing
-- Support FAQ, support ticket creation and support history
-- Notifications
-- Responsive desktop sidebar and mobile bottom navigation
-- Navy/blue SeatReserve theme, cards, status pills, glass panels, hero sections and responsive layouts matching the supplied reference direction
-
-## Backend
-
-Implemented API/domain support for:
-
-- JWT registration and login
-- User profile and wallet balance
-- Bus trip catalogue and search
-- Seeded routes for the next 31 days
-- Trip-specific seat inventory
-- Redisson distributed seat locks
-- PostgreSQL optimistic locking on seats and trip seats
-- 10-minute pending reservations
-- Automatic expiry cleanup every 30 seconds
-- Reservation confirmation and cancellation
-- Payment records and transaction references
-- Wallet debit for wallet payments
-- Wallet refunds after cancellation
-- Booking ticket retrieval
-- Support tickets
-- Notifications
-- Redis-backed rate limiting for reservation POST requests
-
-## Important integration note
-
-Google OAuth, GitHub OAuth, password-reset email delivery, and real external UPI/card/net-banking gateway processing require provider credentials and external services. The local build does not fake those integrations. The payment methods in the UI are represented as application payment methods and are persisted by the backend; wallet payment is fully processed inside the local application.
-
-## Run
-
-### Terminal 1
-
-```powershell
-Set-Location "D:\Downloads\srv\srv"
-docker compose build backend
-docker compose up -d --force-recreate
-Start-Sleep -Seconds 20
-docker compose ps
-docker logs seat-reservation-backend --tail 250
-Invoke-RestMethod "http://localhost:8080/actuator/health"
-Invoke-RestMethod "http://localhost:8080/api/buses/popular"
+## Run locally
 ```
-
-### Terminal 2
-
-```powershell
-Set-Location "D:\Downloads\srv\srv\frontend"
+docker compose up -d --build
+cd frontend
 npm install
-npm run lint
-npm run build
 npm run dev
 ```
+Frontend: http://localhost:5174 (proxies `/api` to http://localhost:8081). Backend health: http://localhost:8081/actuator/health
 
-Open `http://localhost:5173`.
+## Rules implemented
+Seat holds last 5 minutes, up to 6 seats per booking, wallet pay/refund, cancellation before departure, JWT auth, Redis seat locks + rate limiting.
 
-## Database reset
-
-Do not use `docker compose down -v` unless you intentionally want to delete the PostgreSQL and Redis volumes and reseed the demo database.
+## Deploy
+See `DEPLOY_CHECKLIST.md`.
 
 ====================================================================================================
 FILE: render.yaml
@@ -13445,6 +13668,8 @@ public class SecurityConfig {
 
                                 .requestMatchers(
                                         "/actuator/health",
+                                        "/actuator/health/**",
+                                        "/actuator/info",
                                         "/error"
                                 )
                                 .permitAll()
@@ -13478,18 +13703,26 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource(
-            @Value("${cors.allowed-origins}") String allowedOrigins
+            @Value("${cors.allowed-origins}") String allowedOrigins,
+            @Value("${cors.allow-vercel-previews:false}") boolean allowVercelPreviews
     ) {
         CorsConfiguration configuration =
                 new CorsConfiguration();
 
         java.util.List<String> originPatterns =
-                Arrays.stream(
-                                allowedOrigins.split(",")
-                        )
-                        .map(String::trim)
-                        .filter(origin -> !origin.isBlank())
-                        .toList();
+                new java.util.ArrayList<>(
+                        Arrays.stream(
+                                        allowedOrigins.split(",")
+                                )
+                                .map(String::trim)
+                                .map(origin -> origin.replaceAll("/+$", ""))
+                                .filter(origin -> !origin.isBlank())
+                                .toList()
+                );
+
+        if (allowVercelPreviews && !originPatterns.contains("https://*.vercel.app")) {
+            originPatterns.add("https://*.vercel.app");
+        }
 
         configuration.setAllowedOriginPatterns(
                 originPatterns
@@ -18512,18 +18745,34 @@ FILE: vercel.json
 ====================================================================================================
 
 {
+  "framework": null,
   "installCommand": "npm --prefix frontend install --no-audit --no-fund",
   "buildCommand": "npm --prefix frontend run build",
   "outputDirectory": "frontend/dist/seatreserve-frontend/browser",
-  "rewrites": [{ "source": "/((?!assets/|.*\\..*).*)", "destination": "/index.html" }],
+  "rewrites": [
+    {
+      "source": "/((?!assets/|.*\\..*).*)",
+      "destination": "/index.html"
+    }
+  ],
   "headers": [
     {
       "source": "/index.html",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
     },
     {
       "source": "/(.*)\\.(js|css|woff2)",
-      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
     }
   ]
 }

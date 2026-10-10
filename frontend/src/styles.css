@@ -689,3 +689,23 @@ button, input, select, textarea { font: inherit; }
   outline: 2px solid #4a90e2; outline-offset: 2px;
 }
 .sb-option.is-selected { scroll-margin: 6px; }
+
+/* Profile page: change-password section layout and show/hide password toggle. */
+.password-form { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); row-gap: 14px; }
+.form-section-head { grid-column: 1 / -1; display: grid; gap: 4px; }
+.form-section-head h3 { margin: 0; font-size: 16px; color: var(--text); }
+.form-section-head p { margin: 0; color: #7e8da0; font-size: 12px; line-height: 1.45; }
+.password-field { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.password-field > label { color: #6b7c92; font-size: 12px; font-weight: 800; }
+.password-control { position: relative; display: block; }
+.password-control input { padding-right: 48px; }
+.password-control input::-ms-reveal, .password-control input::-ms-clear { display: none; }
+.profile-form input:focus { outline: 0; border-color: #4a90e2; box-shadow: 0 0 0 3px rgba(21, 116, 232, .12); }
+.password-control input.ng-touched.ng-invalid { border-color: #e0868f; }
+.password-toggle { position: absolute; top: 50%; right: 5px; transform: translateY(-50%); width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #7e8da0; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+.password-toggle:hover { background: #edf5ff; color: #1574e8; }
+.password-toggle[aria-pressed="true"] { color: #1574e8; }
+.password-toggle:focus-visible { outline: 2px solid #4a90e2; outline-offset: 1px; }
+.field-hint { color: #7e8da0; font-size: 12px; line-height: 1.4; }
+.field-hint.error { color: #c8535e; }
+.password-form .profile-save-row { padding-top: 6px; }
