@@ -126,6 +126,26 @@ export class WorkspaceService {
     }
   }
 
+  /** Free-text search from the top bar: matches buses leaving from OR going to the term (the API ANDs from/to). */
+  async searchAnywhere(term: string, date: string): Promise<void> {
+    const query = term.trim();
+    this.searchParams = { from: '', to: '', date, passengers: this.requestedPassengers };
+    this.loadingSearch = true;
+    this.hasSearched = true;
+    this.globalError = '';
+    try {
+      const [leaving, arriving] = await Promise.all([
+        this.api.searchBuses({ from: query, date }),
+        this.api.searchBuses({ to: query, date }),
+      ]);
+      const byId = new Map<number, BusTrip>();
+      [...(leaving || []), ...(arriving || [])].forEach(trip => byId.set(trip.id, trip));
+      this.searchTrips = [...byId.values()].sort((a, b) => a.departureTime.localeCompare(b.departureTime));
+    } finally {
+      this.loadingSearch = false;
+    }
+  }
+
   async selectTrip(trip: BusTrip): Promise<void> {
     this.actionBusy = true;
     this.globalError = '';

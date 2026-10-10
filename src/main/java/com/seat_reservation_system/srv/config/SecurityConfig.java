@@ -112,6 +112,8 @@ public class SecurityConfig {
 
                                 .requestMatchers(
                                         "/actuator/health",
+                                        "/actuator/health/**",
+                                        "/actuator/info",
                                         "/error"
                                 )
                                 .permitAll()
@@ -145,18 +147,26 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource(
-            @Value("${cors.allowed-origins}") String allowedOrigins
+            @Value("${cors.allowed-origins}") String allowedOrigins,
+            @Value("${cors.allow-vercel-previews:false}") boolean allowVercelPreviews
     ) {
         CorsConfiguration configuration =
                 new CorsConfiguration();
 
         java.util.List<String> originPatterns =
-                Arrays.stream(
-                                allowedOrigins.split(",")
-                        )
-                        .map(String::trim)
-                        .filter(origin -> !origin.isBlank())
-                        .toList();
+                new java.util.ArrayList<>(
+                        Arrays.stream(
+                                        allowedOrigins.split(",")
+                                )
+                                .map(String::trim)
+                                .map(origin -> origin.replaceAll("/+$", ""))
+                                .filter(origin -> !origin.isBlank())
+                                .toList()
+                );
+
+        if (allowVercelPreviews && !originPatterns.contains("https://*.vercel.app")) {
+            originPatterns.add("https://*.vercel.app");
+        }
 
         configuration.setAllowedOriginPatterns(
                 originPatterns

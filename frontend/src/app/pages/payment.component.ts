@@ -28,7 +28,13 @@ export class PaymentComponent implements OnInit {
   }
 
   get fare(): number { return this.data.pendingReservations.reduce((sum, item) => sum + Number(item.fare || 0), 0); }
-  get fee(): number { return this.data.pendingReservations.reduce((sum, item) => sum + Math.round(Number(item.fare || 0) * 0.035), 0); }
+  get fee(): number { return this.data.pendingReservations.reduce((sum, item) => sum + Math.round((Number(item.fare || 0) * 35) / 1000), 0); }
+  readonly methods = [
+    { key: 'UPI', label: 'UPI', icon: 'wallet', sub: 'GPay · PhonePe · Paytm' },
+    { key: 'CARD', label: 'Card', icon: 'card', sub: 'Visa · Mastercard' },
+    { key: 'NET_BANKING', label: 'Net Banking', icon: 'bank', sub: 'All major banks' },
+    { key: 'WALLET', label: 'Wallet', icon: 'wallet', sub: 'SeatReserve balance' },
+  ];
   get total(): number { return this.fare + this.fee; }
   get walletShort(): boolean { return this.method === 'WALLET' && Number(this.data.wallet.balance || 0) < this.total; }
   get cannotPay(): boolean { return this.data.actionBusy || this.expired || this.walletShort; }

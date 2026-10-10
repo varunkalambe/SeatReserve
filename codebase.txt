@@ -1,7 +1,7 @@
 ====================================================================================================
 PROJECT CODEBASE EXPORT
 Project root: D:\Downloads\srv\srv
-Files discovered: 151
+Files discovered: 152
 ====================================================================================================
 
 
@@ -24,11 +24,12 @@ build
 FILE: .env.example
 ====================================================================================================
 
+# Local docker-compose only. Production values live in the Render / Vercel dashboards (see DEPLOY_CHECKLIST.md).
 POSTGRES_USER=srv_prosgres
 POSTGRES_PASSWORD=change-this-local-password
 JWT_SECRET=replace-with-at-least-32-random-characters
 JWT_EXPIRATION=86400000
-CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174
 WALLET_DEMO_TOP_UP_ENABLED=true
 
 ====================================================================================================
@@ -103,6 +104,72 @@ FILE: combined_codebase.txt
 ====================================================================================================
 
 [SKIPPED: File exceeds 5 MB]
+
+====================================================================================================
+FILE: DEPLOY_CHECKLIST.md
+====================================================================================================
+
+# SeatReserve – what was wrong, what changed, and every env var
+
+## Root causes found in your logs
+1. `ERR_CONNECTION_RESET` – Render free instance was asleep/booting. Your boot log shows **162 s** (Tomcat up only at 07:22:35).
+   Every request fired during that window is reset by the proxy. The old frontend retried a GET only 2x over ~4 s.
+2. `401 … [token=no]` flood – after the first 401/logout the old interceptor still *sent* queued/retried
+   requests **without** a token (`wallet`, `profile`, `notifications`… every ~1 s). Backend was behaving correctly.
+3. JVM defaults on a 512 MB / 0.1 CPU instance (≈128 MB heap, parallel GC/JIT) made the boot far slower than needed.
+4. `scripts/generate-api-base.mjs` is called by `npm run build` but was missing from the export, so it is included here.
+5. Neon closes idle sockets; Hikari had no max-lifetime/keepalive, so the first query after a quiet period could fail.
+
+## Files in this zip (copy over the same paths)
+Backend: `Dockerfile`, `render.yaml`, `.env.example`, `src/main/resources/application.properties`,
+`…/config/SecurityConfig.java`, `…/config/RedissonConfig.java`
+Frontend/Vercel: `vercel.json`, `frontend/package.json`, `frontend/.env.example`, `frontend/scripts/generate-api-base.mjs`,
+`frontend/src/app/app.component.ts`, `core/{api.service,auth.service,auth.interceptor,workspace.service}.ts`,
+`pages/{shell,auth}.component.{ts,html}`, `core/api.service.spec.ts`, `core/auth.interceptor.spec.ts`
+
+## Render → seatreserve-backend → Environment
+| Key | Value |
+|---|---|
+| SPRING_DATASOURCE_URL | `jdbc:postgresql://ep-billowing-wildflower-b3b09wm3.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require` (use the direct, non-`-pooler` host, as in your log) |
+| DB_USERNAME | Neon role name (Neon dashboard → Connection details) |
+| DB_PASSWORD | Neon role password (secret) |
+| REDIS_HOST | `red-dats9v1srm7s739tsgd0` (Render Key Value *internal* hostname, same region as the web service) |
+| REDIS_PORT | `6379` |
+| REDIS_PASSWORD | empty for Render internal URL (set only if your Redis requires one) |
+| REDIS_SSL | `false` (internal URL). If you use an external `rediss://` URL: host=external host, `REDIS_SSL=true` |
+| JWT_SECRET | ≥ 32 random chars, set once and **never rotate casually** (rotating logs everyone out) |
+| JWT_EXPIRATION | `86400000` |
+| CORS_ALLOWED_ORIGINS | `https://seat-reserve-xi.vercel.app,https://seat-reserve-git-main-varunkalambe4294-7255s-projects.vercel.app` (exact origins, no trailing slash, no path) |
+| CORS_ALLOW_VERCEL_PREVIEWS | `true` (also allows any `https://*.vercel.app`) |
+| WALLET_DEMO_TOP_UP_ENABLED | `true` |
+| APP_TIMEZONE | `Asia/Kolkata` |
+| RATE_LIMIT_PER_MINUTE | `60` |
+| JPA_DDL_AUTO | `update` (set `none` after the schema exists to cut ~20 s from boot) |
+| LOG_LEVEL_APP | `INFO` |
+| PORT | do **not** set – Render injects `10000` |
+| JAVA_TOOL_OPTIONS | optional; default is baked into the Dockerfile |
+
+Render settings: Health Check Path = `/actuator/health/liveness`, Runtime = Docker, Region same as Redis.
+
+## Vercel → Project → Settings → Environment Variables (Production + Preview)
+| Key | Value |
+|---|---|
+| VITE_API_BASE_URL | `https://seatreserve-backend.onrender.com` (https, no trailing slash, no `/api`) |
+
+Nothing else. `VITE_WALLET_TOPUP_ENABLED` is a leftover from the React/Vite app and is unused (the backend sends `topUpEnabled`).
+Vercel build settings come from `vercel.json` (Root Directory = repo root, Node 22.x via `engines`). **Redeploy after changing the variable** – it is baked in at build time; the build now fails loudly if it is missing.
+
+## After deploying
+1. Push, let Render rebuild; log must show `[BUILD] tag=…` and `Started SrvApplication`.
+2. Open `https://seatreserve-backend.onrender.com/actuator/health/liveness` → `{"status":"UP"}`.
+3. Open the Vercel site: if the backend is asleep you will now see "Waking up the server…" instead of errors; no more `token=no` 401 spam.
+4. Log out/in once (old stored tokens from the previous deployment may be invalid).
+5. Free-plan reality: Render still sleeps after ~15 min idle (cold start now shorter, still tens of seconds). To avoid it, ping
+   `/actuator/health/liveness` every 5–10 min (UptimeRobot/cron-job.org) or use a paid instance.
+
+## Not verified here
+Backend was not compiled/run in this environment (no Maven repo access); the Java changes are small (CORS list handling, an extra
+permitAll matcher, Redisson timeouts). Frontend was type-checked, unit-tested (41/41 pass) and production-built.
 
 ====================================================================================================
 FILE: docker-compose.yml
@@ -182,6 +249,7 @@ FILE: Dockerfile
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
 COPY pom.xml .
+RUN mvn -B -q dependency:go-offline
 COPY src ./src
 RUN mvn -B -DskipTests clean package
 
@@ -191,14 +259,20 @@ RUN useradd --system --create-home --uid 10001 appuser
 COPY --from=build /app/target/srv-0.0.1-SNAPSHOT.jar /app/app.jar
 USER appuser
 EXPOSE 8080
+# Tuned for Render's 512 MB / 0.1 CPU free instance: the default JVM settings give a ~128 MB heap and
+# multi-threaded JIT/GC that starved the CPU (162 s boot -> every request got ERR_CONNECTION_RESET).
+# Override on Render with the JAVA_TOOL_OPTIONS environment variable if you move to a bigger plan.
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError -Xss512k -Dspring.jmx.enabled=false"
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 
 ====================================================================================================
 FILE: frontend\.env.example
 ====================================================================================================
 
-VITE_API_BASE_URL=http://localhost:8080
-VITE_WALLET_TOPUP_ENABLED=true
+# Used at BUILD time by scripts/generate-api-base.mjs (Vercel -> Project Settings -> Environment Variables).
+# Public origin of the Render backend: https, no trailing slash, no /api suffix.
+# Leave empty for local `ng serve` (the dev proxy forwards /api to http://localhost:8081).
+VITE_API_BASE_URL=https://seatreserve-backend.onrender.com
 
 ====================================================================================================
 FILE: frontend\.gitignore
@@ -8966,8 +9040,11 @@ FILE: frontend\package.json
 {
   "name": "seatreserve-frontend",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node scripts/generate-api-base.mjs && ng serve --port 5174 --proxy-config proxy.conf.json",
     "dev": "node scripts/generate-api-base.mjs && ng serve --port 5174 --proxy-config proxy.conf.json",
@@ -9043,6 +9120,7 @@ FILE: frontend\src\app\app.component.ts
 
 import { Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { ApiService } from './core/api.service';
 
 @Component({
   selector: 'app-root',
@@ -9050,7 +9128,12 @@ import { RouterOutlet } from '@angular/router';
   imports: [RouterOutlet],
   template: '<router-outlet />',
 })
-export class AppComponent {}
+export class AppComponent {
+  constructor(api: ApiService) {
+    // Start waking the (possibly sleeping) Render backend the moment the page opens.
+    void api.ensureAwake().catch(() => undefined);
+  }
+}
 
 ====================================================================================================
 FILE: frontend\src\app\app.config.ts
@@ -9122,6 +9205,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { ApiService } from './api.service';
 import { authInterceptor } from './auth.interceptor';
+import { AuthService } from './auth.service';
 
 /** Each case asserts the exact method, path, query and body the Spring controllers/DTOs expect. */
 describe('ApiService backend contract', () => {
@@ -9131,6 +9215,7 @@ describe('ApiService backend contract', () => {
   beforeEach(() => {
     localStorage.clear();
     TestBed.configureTestingModule({ providers: [provideRouter([]), provideHttpClient(withInterceptors([authInterceptor])), provideHttpClientTesting()] });
+    TestBed.inject(AuthService).save({ token: 'jwt-test', username: 'u', expiresIn: 1, fullName: 'U', email: 'u@x.io' });
     api = TestBed.inject(ApiService);
     backend = TestBed.inject(HttpTestingController);
   });
@@ -9205,22 +9290,38 @@ FILE: frontend\src\app\core\api.service.ts
 
 import { HttpClient, HttpErrorResponse, HttpResponse } from '@angular/common/http';
 import { Injectable, isDevMode } from '@angular/core';
-import { catchError, firstValueFrom, map, retry, throwError, timer } from 'rxjs';
+import { EmptyError, firstValueFrom, takeUntil, timeout } from 'rxjs';
 import { BUILD_API_BASE_URL } from './api-base.generated';
+import { AuthService } from './auth.service';
 import {
   AppNotification, AuthResponse, BusTrip, Profile, Reservation, Seat,
   SupportTicket, Ticket, WalletInfo, WalletTransaction
 } from './models';
 
 const GATEWAY_STATUSES = new Set([502, 503, 504]);
-const REQUEST_TIMEOUT_MS = 100_000;
+const REQUEST_TIMEOUT_MS = 60_000;
+const GET_ATTEMPTS = 3;
+/** Render's free tier needs up to ~3 minutes to boot this Spring app after it has gone to sleep. */
+const WAKE_MAX_MS = 240_000;
+const WAKE_POLL_MS = 3_000;
+const WAKE_PROBE_TIMEOUT_MS = 8_000;
+const HEALTH_PATH = '/actuator/health/liveness';
+
+type ApiError = Error & { status?: number; data?: unknown };
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly baseUrl = this.readBaseUrl();
   private backendBuildChecked = false;
+  private awake = false;
+  private wakePromise: Promise<void> | null = null;
 
-  constructor(private readonly http: HttpClient) {}
+  /** True while the (sleeping) backend is booting; the UI shows a "waking up" notice. */
+  warmingUp = false;
+
+  constructor(private readonly http: HttpClient, private readonly auth: AuthService) {}
 
   private readBaseUrl(): string {
     const metaValue = document.querySelector<HTMLMetaElement>('meta[name="api-base-url"]')?.content?.trim() ?? '';
@@ -9238,31 +9339,72 @@ export class ApiService {
     if (enabled) console.log(`[SRV:${scope}]`, ...details);
   }
 
-  private request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /**
+   * Resolves once the backend answers. Render free instances sleep after ~15 min idle and reset every
+   * connection while booting (ERR_CONNECTION_RESET), so we poll a cheap health endpoint instead of
+   * firing the real requests into a server that is not listening yet. Skipped for same-origin use.
+   */
+  ensureAwake(): Promise<void> {
+    if (this.awake || !this.baseUrl) return Promise.resolve();
+    this.wakePromise ??= this.pollUntilAwake().finally(() => { this.wakePromise = null; });
+    return this.wakePromise;
+  }
+
+  private async pollUntilAwake(): Promise<void> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < WAKE_MAX_MS) {
+      try {
+        const response = await fetch(`${this.baseUrl}${HEALTH_PATH}`, {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(WAKE_PROBE_TIMEOUT_MS),
+        });
+        // Render's own "starting" page has no X-SRV-Build header; our app always sends it.
+        if (response.ok || response.headers.get('X-SRV-Build')) {
+          this.awake = true;
+          this.warmingUp = false;
+          this.debug('WAKE', 'backend is up after', Date.now() - startedAt, 'ms');
+          return;
+        }
+      } catch { /* connection reset / timeout while the instance boots */ }
+      this.warmingUp = true;
+      await sleep(WAKE_POLL_MS);
+    }
+    this.warmingUp = false;
+    throw Object.assign(new Error('The server is taking too long to start. Please wait a minute and try again.'), { status: 503 });
+  }
+
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    this.debug('API', '→', method, path, body ?? '');
-    const source = this.http.request<T>(method, url, {
-      body,
-      observe: 'response',
-      timeout: REQUEST_TIMEOUT_MS,
-    } as never).pipe(
-      retry({
-        count: method === 'GET' ? 2 : 0,
-        delay: (error: unknown, attempt: number) => {
-          const status = error instanceof HttpErrorResponse ? error.status : 0;
-          if (method === 'GET' && (!status || GATEWAY_STATUSES.has(status))) return timer(1500 * attempt);
-          return throwError(() => error);
-        },
-      }),
-      map((value: unknown) => {
-        const response = value as HttpResponse<T>;
+    const maxAttempts = method === 'GET' ? GET_ATTEMPTS : 1;
+
+    for (let attempt = 1; ; attempt++) {
+      if (!this.awake && this.baseUrl) await this.ensureAwake();
+      this.debug('API', '→', method, path, body ?? '');
+      try {
+        const response = await firstValueFrom(
+          this.http.request<T>(method, url, { body, observe: 'response' }).pipe(
+            timeout(REQUEST_TIMEOUT_MS),
+            takeUntil(this.auth.loggedOut$),
+          ),
+        );
+        this.awake = true;
         this.checkBackendBuild(response, path);
         this.debug('API', '←', response.status, method, path, response.body);
         return response.body as T;
-      }),
-      catchError((error: unknown) => throwError(() => this.toApiError(error, method, path))),
-    );
-    return firstValueFrom(source);
+      } catch (error) {
+        if (error instanceof EmptyError) {
+          throw Object.assign(new Error('Your session has ended. Please log in again.'), { status: 401 });
+        }
+        const status = error instanceof HttpErrorResponse ? error.status : 0;
+        const transient = !status || GATEWAY_STATUSES.has(status);
+        if (transient) this.awake = false;
+        if (transient && attempt < maxAttempts) {
+          await sleep(1500 * attempt);
+          continue;
+        }
+        throw this.toApiError(error, method, path);
+      }
+    }
   }
 
   private checkBackendBuild(response: HttpResponse<unknown>, path: string): void {
@@ -9274,11 +9416,10 @@ export class ApiService {
     }
     if (this.backendBuildChecked || path.startsWith('/actuator')) return;
     this.backendBuildChecked = true;
-    console.error('[SRV] The backend did not send X-SRV-Build. It may be an old build (or CORS may hide the header).');
-    window.dispatchEvent(new CustomEvent('srv-backend-stale'));
+    console.warn('[SRV] The backend did not send X-SRV-Build. It may be an old build (or CORS may hide the header).');
   }
 
-  private toApiError(error: unknown, method: string, path: string): Error & { status?: number; data?: unknown } {
+  private toApiError(error: unknown, method: string, path: string): ApiError {
     if (!(error instanceof HttpErrorResponse)) {
       return Object.assign(new Error('Cannot reach the server. Check your internet connection and try again.'), { status: 0 });
     }
@@ -9287,9 +9428,10 @@ export class ApiService {
     let message = typeof data?.error === 'string' ? data.error : '';
     if (!message) {
       if (status === 0) message = 'Cannot reach the server. Check your internet connection and try again.';
+      else if (status === 401) message = 'Your session has expired. Please log in again.';
       else if (status === 429) message = 'Too many requests. Please wait a minute and try again.';
       else if (GATEWAY_STATUSES.has(status)) message = 'The server is starting up or temporarily unavailable. Please wait a few seconds and try again.';
-      else if (status === 404 && !this.baseUrl && !isDevMode()) message = 'The app is not connected to its backend. Set the api-base-url meta value or window.__SEATRESERVE_CONFIG__.apiBaseUrl and redeploy.';
+      else if (status === 404 && !this.baseUrl && !isDevMode()) message = 'The app is not connected to its backend. Set VITE_API_BASE_URL on Vercel and redeploy.';
       else message = `Request failed with status ${status}`;
     }
     this.debug('API', 'failed', method, path, status, message, data);
@@ -9337,7 +9479,6 @@ export class ApiService {
   createSupportTicket(payload: { category: string; message: string }): Promise<SupportTicket> { return this.request('POST', '/api/support/tickets', payload); }
   getNotifications(): Promise<AppNotification[]> { return this.request('GET', '/api/notifications'); }
 }
-
 
 ====================================================================================================
 FILE: frontend\src\app\core\auth.guard.spec.ts
@@ -9489,6 +9630,13 @@ describe('authInterceptor', () => {
     expect(router.navigate).not.toHaveBeenCalled();
   });
 
+  it('rejects protected calls locally with a 401 (no network request) while signed out', () => {
+    let status = 0;
+    http.get('/api/wallet').subscribe({ error: e => { status = e.status; } });
+    backend.expectNone('/api/wallet');
+    expect(status).toBe(401);
+  });
+
   it('keeps the session on non-401 errors such as 409 or 500', () => {
     auth.save({ token: 'jwt-1', username: 'u', expiresIn: 1, fullName: 'U', email: 'u@x.io' });
     http.post('/api/reservations/batch', {}).subscribe({ error: () => undefined });
@@ -9510,23 +9658,55 @@ import { AuthService } from './auth.service';
 import { WorkspaceService } from './workspace.service';
 
 const PUBLIC_AUTH_PATHS = ['/api/auth/login', '/api/auth/register'];
+/** GET endpoints the backend serves without a token (see SecurityConfig). */
+const PUBLIC_GET_PREFIXES = ['/api/buses', '/api/seats', '/actuator'];
+
+function pathOf(url: string): string {
+  try {
+    return new URL(url, 'http://local.invalid').pathname;
+  } catch {
+    return url;
+  }
+}
 
 function isPublicAuthRequest(url: string): boolean {
-  return PUBLIC_AUTH_PATHS.some(path => url.includes(path));
+  const path = pathOf(url);
+  return PUBLIC_AUTH_PATHS.some(candidate => path === candidate || path.startsWith(`${candidate}/`));
+}
+
+function isPublicGet(method: string, url: string): boolean {
+  if (method !== 'GET') return false;
+  const path = pathOf(url);
+  return PUBLIC_GET_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`));
 }
 
 /**
  * Adds the bearer token to API calls and ends the session centrally when the backend rejects it
- * (HTTP 401 on any authenticated call: expired or invalid JWT). Login/register 401s are ordinary
- * "invalid credentials" errors and are left for the login form to display.
+ * (HTTP 401 on any authenticated call: expired or invalid JWT).
+ *
+ * Protected calls made while signed out are rejected locally with a 401 and never reach the network.
+ * Previously they were sent without a token, which produced the endless "[token=no] -> 401" flood
+ * in the backend log whenever a logout happened while retries were still queued.
  */
 export const authInterceptor: HttpInterceptorFn = (request, next) => {
   const auth = inject(AuthService);
   const injector = inject(Injector);
-  const token = auth.token;
-  if (!token || isPublicAuthRequest(request.url)) {
+
+  if (isPublicAuthRequest(request.url)) {
     return next(request);
   }
+
+  const token = auth.token;
+  if (!token) {
+    if (isPublicGet(request.method, request.url)) return next(request);
+    return throwError(() => new HttpErrorResponse({
+      status: 401,
+      statusText: 'Unauthorized',
+      url: request.url,
+      error: { error: 'Please log in to continue.', status: 401 },
+    }));
+  }
+
   const authorised = request.clone({ setHeaders: { Authorization: `Bearer ${token}` } });
   return next(authorised).pipe(
     catchError((error: unknown) => {
@@ -9547,13 +9727,30 @@ FILE: frontend\src\app\core\auth.service.ts
 ====================================================================================================
 
 import { Injectable } from '@angular/core';
+import { Subject } from 'rxjs';
 import { AuthResponse } from './models';
 
 const AUTH_STORAGE_KEY = 'seat-reserve-auth';
 
+/** Returns the JWT expiry in ms, or null when the token is not a decodable JWT. */
+function jwtExpiryMs(token: string): number | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const json = atob(part.replace(/-/g, '+').replace(/_/g, '/'));
+    const exp = (JSON.parse(json) as { exp?: number }).exp;
+    return typeof exp === 'number' ? exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private currentAuth: AuthResponse | null = this.loadStoredAuth();
+
+  /** Emits whenever the session ends so in-flight requests/retries can be cancelled. */
+  readonly loggedOut$ = new Subject<void>();
 
   get auth(): AuthResponse | null {
     return this.currentAuth;
@@ -9563,8 +9760,16 @@ export class AuthService {
     return this.currentAuth?.token ?? null;
   }
 
+  /** True only for a stored token that has not expired (expired tokens are dropped immediately). */
   get isAuthenticated(): boolean {
-    return Boolean(this.currentAuth?.token);
+    const token = this.currentAuth?.token;
+    if (!token) return false;
+    const expiry = jwtExpiryMs(token);
+    if (expiry !== null && expiry <= Date.now()) {
+      this.logout();
+      return false;
+    }
+    return true;
   }
 
   save(auth: AuthResponse): void {
@@ -9582,6 +9787,7 @@ export class AuthService {
   }
 
   logout(): void {
+    const hadSession = this.currentAuth !== null;
     this.currentAuth = null;
     try {
       localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -9589,6 +9795,7 @@ export class AuthService {
     } catch {
       // No-op when browser storage is unavailable.
     }
+    if (hadSession) this.loggedOut$.next();
   }
 
   private loadStoredAuth(): AuthResponse | null {
@@ -9837,17 +10044,26 @@ export class WorkspaceService {
   constructor(readonly api: ApiService, readonly auth: AuthService) {}
 
   async loadInitial(): Promise<void> {
-    const [profile, popular, reservations, wallet, transactions, tickets, notifications] = await Promise.all([
+    // allSettled: one slow or failing endpoint must not blank the whole dashboard.
+    const [profile, popular, reservations, wallet, transactions, tickets, notifications] = await Promise.allSettled([
       this.api.getProfile(), this.api.popularBuses(), this.api.getMyReservations(),
       this.api.getWallet(), this.api.getWalletTransactions(), this.api.getSupportTickets(), this.api.getNotifications(),
     ]);
-    this.profile = profile;
-    this.popularTrips = popular || [];
-    this.reservations = stampReservations(reservations || []);
-    this.wallet = wallet || this.wallet;
-    this.transactions = transactions || [];
-    this.supportTickets = tickets || [];
-    this.notifications = notifications || [];
+    const all = [profile, popular, reservations, wallet, transactions, tickets, notifications];
+    const unauthorized = all.find(r => r.status === 'rejected' && (r.reason as { status?: number })?.status === 401) as PromiseRejectedResult | undefined;
+    if (unauthorized) throw unauthorized.reason;
+    if (profile.status === 'rejected') throw profile.reason;
+
+    this.profile = profile.value;
+    if (popular.status === 'fulfilled') this.popularTrips = popular.value || [];
+    if (reservations.status === 'fulfilled') this.reservations = stampReservations(reservations.value || []);
+    if (wallet.status === 'fulfilled') this.wallet = wallet.value || this.wallet;
+    if (transactions.status === 'fulfilled') this.transactions = transactions.value || [];
+    if (tickets.status === 'fulfilled') this.supportTickets = tickets.value || [];
+    if (notifications.status === 'fulfilled') this.notifications = notifications.value || [];
+
+    const failed = all.find(r => r.status === 'rejected') as PromiseRejectedResult | undefined;
+    if (failed) this.globalError = `Some data could not be loaded (${(failed.reason as Error)?.message || 'network error'}). It will refresh automatically.`;
   }
 
   async refreshReservations(): Promise<void> { this.reservations = stampReservations(await this.api.getMyReservations() || []); }
@@ -10032,7 +10248,6 @@ export class WorkspaceService {
   }
 }
 
-
 ====================================================================================================
 FILE: frontend\src\app\pages\auth.component.html
 ====================================================================================================
@@ -10056,6 +10271,7 @@ FILE: frontend\src\app\pages\auth.component.html
       <div class="brand brand-compact"><span class="brand-icon"><app-icon name="bus" [size]="22" [strokeWidth]="2.2" /></span><span><strong>Seat<span>Reserve</span></strong></span></div>
       <div class="auth-tabs"><button type="button" [class.active]="mode === 'login'" (click)="toggleMode('login')">Log in</button><button type="button" [class.active]="mode === 'register'" (click)="toggleMode('register')">Sign up</button></div>
       <div class="auth-title"><h2>{{ mode === 'login' ? 'Welcome back' : 'Create your account' }}</h2><p>{{ mode === 'login' ? 'Log in to continue your journey' : 'Join us and start your journey' }}</p></div>
+      <div *ngIf="api.warmingUp" class="alert" role="status">Waking up the server… this can take up to 2–3 minutes after a quiet period. You can log in as soon as it is ready.</div>
       <div *ngIf="error" class="alert error" role="alert">{{ error }}</div>
       <form class="form-stack" [formGroup]="form" (ngSubmit)="submit()">
         <label *ngIf="mode === 'register'">Full Name<input formControlName="fullName" placeholder="Your full name" autocomplete="name" [required]="mode === 'register'"></label>
@@ -10067,7 +10283,6 @@ FILE: frontend\src\app\pages\auth.component.html
     </div>
   </section>
 </main>
-
 
 ====================================================================================================
 FILE: frontend\src\app\pages\auth.component.spec.ts
@@ -10168,7 +10383,7 @@ export class AuthComponent {
     password: ['', [Validators.required, Validators.minLength(8)]],
   });
 
-  constructor(private readonly fb: FormBuilder, private readonly api: ApiService, private readonly auth: AuthService, private readonly router: Router) {}
+  constructor(private readonly fb: FormBuilder, readonly api: ApiService, private readonly auth: AuthService, private readonly router: Router) {}
 
   toggleMode(mode?: 'login' | 'register'): void {
     this.mode = mode ?? (this.mode === 'login' ? 'register' : 'login');
@@ -10196,7 +10411,6 @@ export class AuthComponent {
     }
   }
 }
-
 
 ====================================================================================================
 FILE: frontend\src\app\pages\bookings.component.html
@@ -10712,6 +10926,7 @@ FILE: frontend\src\app\pages\shell.component.html
       <div *ngIf="data.notifications.length" class="notification-list"><div *ngFor="let note of data.notifications" class="notification-item"><span class="notification-type" [class.success]="note.type === 'success'" [class.warning]="note.type === 'warning'"><app-icon [name]="note.type === 'success' ? 'check' : note.type === 'warning' ? 'clock' : 'bell'" [size]="15" /></span><div><strong>{{ note.title }}</strong><p>{{ note.message }}</p><small>{{ formatDate(note.createdAt) }} · {{ formatTime(note.createdAt) }}</small></div></div></div>
     </section>
 
+    <div *ngIf="api.warmingUp" class="global-alert" role="status"><app-icon name="clock" [size]="17" /><span>Waking up the server… the first load after a quiet period can take up to 2–3 minutes. Your data will appear automatically.</span></div>
     <div *ngIf="data.globalError" class="global-alert" role="alert"><app-icon name="help" [size]="17" /><span>{{ data.globalError }}</span><button type="button" (click)="data.globalError = ''" aria-label="Dismiss message"><app-icon name="close" [size]="15" /></button></div>
     <main class="app-content">
       <router-outlet />
@@ -10736,7 +10951,6 @@ FILE: frontend\src\app\pages\shell.component.html
     </section>
   </div>
 </div>
-
 
 ====================================================================================================
 FILE: frontend\src\app\pages\shell.component.ts
@@ -10772,14 +10986,17 @@ export class ShellComponent implements OnInit {
   readonly formatTime = formatTime;
   readonly money = money;
   topSearch = '';
+  private polling = false;
 
-  constructor(readonly data: WorkspaceService, private readonly api: ApiService, readonly auth: AuthService, private readonly router: Router) {}
+  constructor(readonly data: WorkspaceService, readonly api: ApiService, readonly auth: AuthService, private readonly router: Router) {}
 
   ngOnInit(): void {
     void this.load();
     interval(7000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
-      if (!this.auth.isAuthenticated) return;
-      this.data.pollRefresh().catch(error => this.handleError(error));
+      // Skip while signed out, while the backend is waking, or while the previous poll is still running.
+      if (!this.auth.isAuthenticated || this.api.warmingUp || this.polling) return;
+      this.polling = true;
+      this.data.pollRefresh().catch(error => this.handleError(error)).finally(() => { this.polling = false; });
     });
   }
 
@@ -10790,6 +11007,7 @@ export class ShellComponent implements OnInit {
 
   private async load(): Promise<void> {
     try {
+      await this.api.ensureAwake();
       await this.data.loadInitial();
     } catch (error) {
       this.handleError(error);
@@ -10801,6 +11019,7 @@ export class ShellComponent implements OnInit {
     if (failure?.status === 401) {
       this.signOut();
     } else {
+      if (failure?.status === 0 || failure?.status === 503) { this.data.globalError ||= failure?.message || ''; return; }
       this.data.globalError = failure?.message || 'Something went wrong. Please try again.';
     }
   }
@@ -10826,7 +11045,6 @@ export class ShellComponent implements OnInit {
   closeTicket(): void { this.data.ticket = null; }
   printTicket(): void { window.print(); }
 }
-
 
 ====================================================================================================
 FILE: frontend\src\app\pages\support.component.html
@@ -12469,7 +12687,7 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /actuator/health
+    healthCheckPath: /actuator/health/liveness
     envVars:
       - key: SPRING_DATASOURCE_URL
         sync: false
@@ -12490,9 +12708,17 @@ services:
       - key: JWT_EXPIRATION
         value: "86400000"
       - key: CORS_ALLOWED_ORIGINS
-        sync: false
+        value: "https://seat-reserve-xi.vercel.app,https://seat-reserve-git-main-varunkalambe4294-7255s-projects.vercel.app"
+      - key: CORS_ALLOW_VERCEL_PREVIEWS
+        value: "true"
       - key: WALLET_DEMO_TOP_UP_ENABLED
         value: "true"
+      - key: APP_TIMEZONE
+        value: "Asia/Kolkata"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: JPA_DDL_AUTO
+        value: "update"
       - key: LOG_LEVEL_APP
         value: "INFO"
 
@@ -12799,6 +13025,12 @@ public class RedissonConfig {
                                         ":" +
                                         port
                         )
+                        .setConnectTimeout(10_000)
+                        .setTimeout(5_000)
+                        .setRetryAttempts(3)
+                        // Render Key Value drops idle sockets; ping keeps them alive instead of failing the first request.
+                        .setPingConnectionInterval(30_000)
+                        .setKeepAlive(true)
                         .setConnectionMinimumIdleSize(2)
                         .setConnectionPoolSize(10)
                         .setSubscriptionConnectionMinimumIdleSize(1)
@@ -13251,7 +13483,7 @@ public class SecurityConfig {
         CorsConfiguration configuration =
                 new CorsConfiguration();
 
-        List<String> originPatterns =
+        java.util.List<String> originPatterns =
                 Arrays.stream(
                                 allowedOrigins.split(",")
                         )
@@ -18182,6 +18414,7 @@ spring.application.name=srv
 
 server.port=${PORT:8080}
 server.shutdown=graceful
+spring.lifecycle.timeout-per-shutdown-phase=20s
 # Honour X-Forwarded-* headers from Render/Vercel proxies (real client IP for rate limiting)
 server.forward-headers-strategy=framework
 
@@ -18195,19 +18428,33 @@ spring.datasource.username=${DB_USERNAME:srv_prosgres}
 spring.datasource.password=${DB_PASSWORD:srv_pass_1234}
 spring.datasource.hikari.maximum-pool-size=${DB_POOL_SIZE:5}
 spring.datasource.hikari.minimum-idle=${DB_MIN_IDLE:1}
+# Neon suspends idle compute and closes sockets: recycle connections before that and keep them probed,
+# otherwise the first request after a quiet period dies with "connection reset / closed".
+spring.datasource.hikari.connection-timeout=30000
+spring.datasource.hikari.max-lifetime=240000
+spring.datasource.hikari.keepalive-time=120000
 
-spring.jpa.hibernate.ddl-auto=update
+# "update" creates/extends tables. Once the schema exists you may set JPA_DDL_AUTO=none on Render to
+# shave ~20s off every cold start.
+spring.jpa.hibernate.ddl-auto=${JPA_DDL_AUTO:update}
 spring.jpa.open-in-view=false
 
 spring.data.redis.host=${REDIS_HOST:localhost}
 spring.data.redis.port=${REDIS_PORT:6379}
 spring.data.redis.password=${REDIS_PASSWORD:}
 spring.data.redis.ssl.enabled=${REDIS_SSL:false}
+spring.data.redis.timeout=3s
+spring.data.redis.connect-timeout=5s
+# Only JPA repositories are used; skipping Redis repository scanning removes startup noise and time.
+spring.data.redis.repositories.enabled=false
 
 jwt.secret=${JWT_SECRET}
 jwt.expiration=${JWT_EXPIRATION:86400000}
 
-cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,https://seat-reserve-xi.vercel.app,https://seat-reserve-git-main-varunkalambe4294-7255s-projects.vercel.app,https://*.vercel.app}
+# Comma separated browser origins allowed to call this API (no trailing slash). Wildcards are allowed.
+cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,https://seat-reserve-xi.vercel.app,https://seat-reserve-git-main-varunkalambe4294-7255s-projects.vercel.app}
+# Also allow any https://*.vercel.app preview deployment. Set to false to lock CORS to the list above.
+cors.allow-vercel-previews=${CORS_ALLOW_VERCEL_PREVIEWS:true}
 
 # Wallet top-up is a simulated payment (no real gateway yet) guarded by caps. Set to false to switch it off.
 wallet.demo-top-up-enabled=${WALLET_DEMO_TOP_UP_ENABLED:true}
@@ -18216,11 +18463,12 @@ wallet.top-up.max-balance=${WALLET_MAX_BALANCE:100000}
 
 management.endpoints.web.exposure.include=health,info
 management.endpoint.health.show-details=never
+# /actuator/health/liveness is always UP once the app has booted and does not depend on Redis/DB,
+# so Render's health check and the browser "wake-up" probe never flap because of a dependency blip.
+management.endpoint.health.probes.enabled=true
 
 # Booking-flow logging. Set LOG_LEVEL_APP=DEBUG to trace a problem; INFO is the production default.
 logging.level.com.seat_reservation_system.srv=${LOG_LEVEL_APP:INFO}
-
-
 
 ====================================================================================================
 FILE: src\test\java\com\seat_reservation_system\srv\SrvApplicationTests.java
@@ -18267,5 +18515,15 @@ FILE: vercel.json
   "installCommand": "npm --prefix frontend install --no-audit --no-fund",
   "buildCommand": "npm --prefix frontend run build",
   "outputDirectory": "frontend/dist/seatreserve-frontend/browser",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/((?!assets/|.*\\..*).*)", "destination": "/index.html" }],
+  "headers": [
+    {
+      "source": "/index.html",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    },
+    {
+      "source": "/(.*)\\.(js|css|woff2)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    }
+  ]
 }

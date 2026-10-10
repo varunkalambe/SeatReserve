@@ -1,16 +1,29 @@
 import { Component, Input } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 @Component({
   selector: 'app-icon',
   standalone: true,
-  template: '<svg [attr.width]="size" [attr.height]="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" [attr.stroke-width]="strokeWidth" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" [innerHTML]="pathMarkup"></svg>',
+  host: { style: 'display:inline-flex;flex:none;align-items:center;justify-content:center;line-height:0' },
+  template: '<svg [attr.width]="size" [attr.height]="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" [attr.stroke-width]="strokeWidth" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="flex:none" [innerHTML]="markup"></svg>',
 })
 export class IconComponent {
-  @Input() name = 'more';
+  @Input() set name(value: string) {
+    this.current = value;
+    this.markup = this.resolve(value);
+  }
+  get name(): string { return this.current; }
   @Input() size = 20;
   @Input() strokeWidth = 1.8;
 
-  private readonly paths: Record<string, string> = {
+  markup: SafeHtml;
+  private current = 'more';
+
+  constructor(private readonly sanitizer: DomSanitizer) {
+    this.markup = this.resolve(this.current);
+  }
+
+  private static readonly paths: Record<string, string> = {
     home: '<path d="m3 10 9-7 9 7"/><path d="M5 9v10h14V9"/><path d="M9 19v-6h6v6"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 5 5"/>',
     calendar: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M7 2.5v4M17 2.5v4M3 9h18"/><path d="M7 13h3M14 13h3M7 17h3"/>',
@@ -40,5 +53,16 @@ export class IconComponent {
     bank: '<path d="m3 9 9-6 9 6M4 10h16M5 10v8M9 10v8M15 10v8M19 10v8M3 20h18"/>',
   };
 
-  get pathMarkup(): string { return this.paths[this.name] ?? this.paths['more']; }
+  private static readonly cache = new Map<string, SafeHtml>();
+
+  /** The markup is a static, hard-coded allow-list (never user input). Angular's HTML sanitizer strips every SVG child element, so it is marked trusted once per icon and cached. */
+  private resolve(name: string): SafeHtml {
+    const key = Object.prototype.hasOwnProperty.call(IconComponent.paths, name) ? name : 'more';
+    let safe = IconComponent.cache.get(key);
+    if (!safe) {
+      safe = this.sanitizer.bypassSecurityTrustHtml(IconComponent.paths[key]);
+      IconComponent.cache.set(key, safe);
+    }
+    return safe;
+  }
 }

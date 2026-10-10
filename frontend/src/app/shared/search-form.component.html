@@ -1,32 +1,56 @@
 <div class="search-box sb">
   <div class="search-toggle"><button class="trip-toggle active" type="button">One Way</button></div>
-  <form [formGroup]="form" (ngSubmit)="submit()">
+  <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
     <div class="sb-grid">
       <div class="sb-field">
         <label class="sb-label" for="from-city">From</label>
-        <div class="sb-control">
-          <app-icon name="map" [size]="16" />
-          <input id="from-city" formControlName="from" list="seatreserve-cities" autocomplete="off" placeholder="Leaving from">
+        <div class="sb-control" [class.is-open]="openField === 'from'">
+          <app-icon class="sb-lead" name="map" [size]="17" />
+          <input #fromInput id="from-city" formControlName="from" autocomplete="off" placeholder="Leaving from"
+                 role="combobox" aria-autocomplete="list" aria-controls="sb-menu-from" [attr.aria-expanded]="openField === 'from'"
+                 (focus)="openMenu('from')" (input)="onType('from')" (keydown)="onKey('from', $event)" (blur)="closeMenu('from')">
+          <button *ngIf="form.controls.from.value" type="button" class="sb-clear" aria-label="Clear departure city"
+                  (mousedown)="$event.preventDefault()" (click)="clearField('from')"><app-icon name="close" [size]="12" [strokeWidth]="2.4" /></button>
+        </div>
+        <div *ngIf="openField === 'from'" class="sb-menu" id="sb-menu-from" role="listbox" (mousedown)="$event.preventDefault()">
+          <button *ngFor="let city of options('from'); let i = index" type="button" role="option" class="sb-option"
+                  [class.is-selected]="isSelected('from', city) || i === activeIndex" [attr.aria-selected]="isSelected('from', city)" (click)="pick('from', city)">
+            <app-icon class="sb-option-icon" name="map" [size]="15" /><span>{{ city }}</span><app-icon *ngIf="isSelected('from', city)" class="sb-option-check" name="check" [size]="15" />
+          </button>
+          <div *ngIf="!options('from').length" class="sb-empty">No listed city matches “{{ form.controls.from.value }}”. Press search to try it anyway.</div>
         </div>
       </div>
-      <button class="sb-swap" type="button" aria-label="Swap From and To" title="Swap cities" (click)="swapCities()"><app-icon name="swap" [size]="16" /></button>
+
+      <button class="sb-swap" type="button" aria-label="Swap From and To" title="Swap cities" (click)="swapCities()"><app-icon name="swap" [size]="17" /></button>
+
       <div class="sb-field">
         <label class="sb-label" for="to-city">To</label>
-        <div class="sb-control">
-          <app-icon name="map" [size]="16" />
-          <input id="to-city" formControlName="to" list="seatreserve-cities" autocomplete="off" placeholder="Going to">
+        <div class="sb-control" [class.is-open]="openField === 'to'">
+          <app-icon class="sb-lead" name="map" [size]="17" />
+          <input #toInput id="to-city" formControlName="to" autocomplete="off" placeholder="Going to"
+                 role="combobox" aria-autocomplete="list" aria-controls="sb-menu-to" [attr.aria-expanded]="openField === 'to'"
+                 (focus)="openMenu('to')" (input)="onType('to')" (keydown)="onKey('to', $event)" (blur)="closeMenu('to')">
+          <button *ngIf="form.controls.to.value" type="button" class="sb-clear" aria-label="Clear destination city"
+                  (mousedown)="$event.preventDefault()" (click)="clearField('to')"><app-icon name="close" [size]="12" [strokeWidth]="2.4" /></button>
+        </div>
+        <div *ngIf="openField === 'to'" class="sb-menu" id="sb-menu-to" role="listbox" (mousedown)="$event.preventDefault()">
+          <button *ngFor="let city of options('to'); let i = index" type="button" role="option" class="sb-option"
+                  [class.is-selected]="isSelected('to', city) || i === activeIndex" [attr.aria-selected]="isSelected('to', city)" (click)="pick('to', city)">
+            <app-icon class="sb-option-icon" name="map" [size]="15" /><span>{{ city }}</span><app-icon *ngIf="isSelected('to', city)" class="sb-option-check" name="check" [size]="15" />
+          </button>
+          <div *ngIf="!options('to').length" class="sb-empty">No listed city matches “{{ form.controls.to.value }}”. Press search to try it anyway.</div>
         </div>
       </div>
-      <datalist id="seatreserve-cities"><option *ngFor="let city of cities" [value]="city"></option></datalist>
+
       <div class="sb-rest">
         <div class="sb-field">
           <label class="sb-label" for="sb-date">Date</label>
-          <div class="sb-control"><app-icon name="calendar" [size]="16" /><input id="sb-date" type="date" formControlName="date" [min]="today"></div>
+          <div class="sb-control"><app-icon class="sb-lead" name="calendar" [size]="17" /><input id="sb-date" type="date" formControlName="date" [min]="today"></div>
         </div>
         <div class="sb-field">
           <span class="sb-label">Passengers</span>
           <div class="sb-control sb-stepper">
-            <app-icon name="user" [size]="16" />
+            <app-icon class="sb-lead" name="user" [size]="17" />
             <div class="sb-stepper-controls">
               <button type="button" aria-label="Fewer passengers" [disabled]="passengers <= 1" (click)="changePassengers(-1)">−</button>
               <strong aria-live="polite">{{ passengers }}</strong>
@@ -34,7 +58,7 @@
             </div>
           </div>
         </div>
-        <button class="blue-button sb-submit" type="submit"><app-icon name="search" [size]="16" /> Search Buses</button>
+        <button class="blue-button sb-submit" type="submit"><app-icon name="search" [size]="17" /> Search Buses</button>
       </div>
     </div>
     <div class="sb-quick">
@@ -45,4 +69,3 @@
     <p *ngIf="error" class="sb-error" role="alert">{{ error }}</p>
   </form>
 </div>
-

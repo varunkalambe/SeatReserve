@@ -6,7 +6,7 @@ import { interval } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
-import { WorkspaceService, formatDate, formatTime, money } from '../core/workspace.service';
+import { WorkspaceService, formatDate, formatTime, money, todayInput } from '../core/workspace.service';
 import { IconComponent } from '../shared/icon.component';
 
 @Component({
@@ -36,7 +36,7 @@ export class ShellComponent implements OnInit {
     void this.load();
     interval(7000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       // Skip while signed out, while the backend is waking, or while the previous poll is still running.
-      if (!this.auth.isAuthenticated || this.api.warmingUp || this.polling) return;
+      if (!this.auth.isAuthenticated || this.api.warmingUp || this.polling || document.hidden) return;
       this.polling = true;
       this.data.pollRefresh().catch(error => this.handleError(error)).finally(() => { this.polling = false; });
     });
@@ -69,9 +69,11 @@ export class ShellComponent implements OnInit {
   async searchFromTopbar(): Promise<void> {
     const query = this.topSearch.trim();
     if (!query) { await this.router.navigate(['/search']); return; }
-    this.data.searchParams = { ...this.data.searchParams, from: query };
+    const parts = query.split(/\s*(?:\s+to\s+|->|→)\s*/i).map(part => part.trim()).filter(Boolean);
+    const date = this.data.searchParams.date >= todayInput(0) ? this.data.searchParams.date : todayInput(1);
     try {
-      await this.data.search(this.data.searchParams);
+      if (parts.length === 2) await this.data.search({ ...this.data.searchParams, from: parts[0], to: parts[1], date });
+      else await this.data.searchAnywhere(query, date);
       await this.router.navigate(['/search']);
       this.topSearch = '';
     } catch (error) { this.handleError(error); }

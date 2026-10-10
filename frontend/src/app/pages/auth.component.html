@@ -22,7 +22,7 @@
       <form class="form-stack" [formGroup]="form" (ngSubmit)="submit()">
         <label *ngIf="mode === 'register'">Full Name<input formControlName="fullName" placeholder="Your full name" autocomplete="name" [required]="mode === 'register'"></label>
         <label>Email<input type="email" formControlName="email" placeholder="you@example.com" autocomplete="email" required></label>
-        <label>Password<div class="input-with-icon"><input type="password" formControlName="password" [placeholder]="mode === 'login' ? 'Enter your password' : 'Create a strong password'" autocomplete="current-password" minlength="8" required><app-icon name="shield" [size]="17" /></div></label>
+        <label>Password<div class="input-with-icon"><input type="password" formControlName="password" [placeholder]="mode === 'login' ? 'Enter your password' : 'Create a strong password'" [attr.autocomplete]="mode === 'login' ? 'current-password' : 'new-password'" minlength="8" required><app-icon name="shield" [size]="17" /></div></label>
         <button class="blue-button wide" [disabled]="busy" type="submit">{{ busy ? 'Please wait…' : (mode === 'login' ? 'Login' : 'Sign Up') }}</button>
       </form>
       <p class="auth-foot">{{ mode === 'login' ? "Don't have an account?" : 'Already have an account?' }} <button type="button" class="link-button" (click)="toggleMode()">{{ mode === 'login' ? 'Sign up' : 'Log in' }}</button></p>
